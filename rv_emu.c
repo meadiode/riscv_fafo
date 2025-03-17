@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-
+#include <math.h>
 
 typedef struct 
 {
@@ -50,6 +50,34 @@ typedef struct
     uint32_t align;
 
 } prog_hdr_t;
+
+
+typedef struct
+{
+    uint32_t name;
+    uint32_t type;
+    uint32_t flags;
+    uint32_t addr;
+    uint32_t offset;
+    uint32_t size;
+    uint32_t link;
+    uint32_t info;
+    uint32_t addralign;
+    uint32_t entsize;
+
+} sec_hdr_t;
+
+
+typedef struct
+{
+    uint32_t name;
+    uint32_t value;
+    uint32_t size;
+    uint8_t  info;
+    uint8_t  other;
+    uint16_t shndx;
+
+} sym_t;
 
 
 typedef struct
@@ -337,7 +365,6 @@ bool device_run_cycle(device_t *dev)
         {
         case 0x00: /* sb */
             uint8_t bt = dev->regs[rs2] & 0xff;
-            printf("Addr: 0x%08X\n", addr);
             res = device_write(dev, addr, &bt, 1);
             break;
 
@@ -347,6 +374,7 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* sw */
+            printf("Addr: 0x%08X\n", addr);
             res = device_write(dev, addr, (uint8_t*)&dev->regs[rs2], 4);
             break;
 
@@ -382,6 +410,7 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* lw */
+            printf("Addr: 0x%08X\n", addr);
             uint32_t w;
             res = device_read(dev, addr, (uint8_t*)&w, 4);
             dev->regs[rd] = w;
@@ -584,11 +613,11 @@ int main(int argc, char **argv)
     fread(prog_table, sizeof(prog_hdr_t), elf_hdr.phnum, elf);
 
 
-    device_init(&dev, 1024, 0x08000000, 256, 0x20000000, 4, 0x01000000);
+    device_init(&dev, 1024 * 20, 0x08000000, 1024 * 8, 0x20000000, 4, 0x01000000);
 
     for (int i = 0; i < elf_hdr.phnum; i++)
     {
-        if (prog_table[i].type == 1)
+        if (prog_table[i].type == 1) /* PT_LOAD */
         {
             fseek(elf, prog_table[i].offset, SEEK_SET);
             for (int j = 0; j < prog_table[i].memsz; j++)
@@ -604,8 +633,66 @@ int main(int argc, char **argv)
         }
     }
 
-    fclose(elf);
+    fseek(elf, elf_hdr.shoff, SEEK_SET);
 
+    sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
+    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
+    int strtab_id = -1;
+    int symtab_id = -1;
+
+    /* Find string and symbol table indices */
+    for (int i = 0; i < elf_hdr.shnum; i++)
+    {
+        fseek(elf, sec_table[elf_hdr.shstrndx].offset + sec_table[i].name, SEEK_SET);
+        char sname[16] = {0};
+        fread(sname, 1, sizeof(".strtab"), elf);
+
+        if (sec_table[i].type == 0x03 && !strcmp(".strtab", sname))
+        {
+            strtab_id = i;
+        }
+        else if (sec_table[i].type == 0x02 && !strcmp(".symtab", sname))
+        {
+            symtab_id = i;
+        }
+    }
+
+    /* Find the _exit symbol address */
+    fseek(elf, sec_table[symtab_id].offset, SEEK_SET);
+    sym_t *symbols = malloc(sec_table[symtab_id].size);
+    fread(symbols, 1, sec_table[symtab_id].size, elf);
+
+    uint32_t exit_addr = 0x0;
+
+    for (int i = 0; i < sec_table[symtab_id].size / sizeof(sym_t); i++)
+    {
+        if ((symbols[i].info & 0x0f) == 0x02) /* STT_FUNC */
+        {
+            char sname[200] = {0};
+            int ssize = 0;
+            char c = 0;
+            fseek(elf, sec_table[strtab_id].offset + symbols[i].name, SEEK_SET);
+            do
+            {
+                fread(&c, 1, 1, elf);
+                sname[ssize++] = c;
+            }
+            while(c);
+
+            if (!strcmp("_exit", sname))
+            {
+                exit_addr = symbols[i].value;
+                break;
+            }
+        }
+    }
+
+    fclose(elf);
+    free(prog_table);
+    free(sec_table);
+    free(symbols);
+
+    printf("_exit address: 0x%08X\n", exit_addr);
 
     for (int i = 0; i < 10000; i++)
     {
@@ -615,7 +702,7 @@ int main(int argc, char **argv)
             break;
         }
 
-        if (dev.pc == 0x800000C)
+        if (dev.pc == exit_addr)
         {
             printf("Program done!\n");
             printf("Elapsed CPU cycles: %lu\n", dev.elapsed_cycles);

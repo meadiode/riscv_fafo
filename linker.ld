@@ -1,19 +1,20 @@
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 1K
-    RAM (xrw)   : ORIGIN = 0x20000000, LENGTH = 256
+    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 20K
+    RAM (xrw)   : ORIGIN = 0x20000000, LENGTH = 8K
 }
 
 
-ENTRY(_start)
+ENTRY(_init)
 
-STACK_SIZE = 64;
+STACK_SIZE = 1024;
 
 SECTIONS
 {
     . = 0x80000000;
 
     .text : {
+        build/init.o(.text)
         *(.text)
     } > FLASH
 
@@ -26,20 +27,23 @@ SECTIONS
     } >RAM
 
     .bss : {
+        __bss_start = .;
+        PROVIDE(__global_pointer$ = . + 2K);
         *(.bss)
+        _end = .;
     } > RAM
 
     .stack (NOLOAD) : {
         . = ALIGN(16);
-        __stack_start = .;
-        . = . + 64;
-        __stack_end = .;
+        __stack_start = ORIGIN(RAM) + LENGTH(RAM) - STACK_SIZE - 16;
+        . = . + STACK_SIZE;
+        __stack_end = ORIGIN(RAM) + LENGTH(RAM) - 16;
     } > RAM
 
     /* Discard unnecessary sections */
     /DISCARD/ : {
         *(.comment)
-        *(.eh_frame)
+       /* *(.eh_frame) */
         *(.note*)
     }
 }

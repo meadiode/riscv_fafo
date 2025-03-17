@@ -1,9 +1,9 @@
 .section .text
-.global _start
+.global _init
 
-_start:
+_init:
     la sp, __stack_end   # Init sp
-    jal ra, main
+    jal ra, _start
 loop:
     j loop
 
