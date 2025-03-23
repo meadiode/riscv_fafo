@@ -32,10 +32,10 @@ RV_OBJDUMP = $(RV_CROSSCOMP)objdump
 
 
 RV_CFLAGS = -march=rv32i -mabi=ilp32
-# RV_CFLAGS += -Os -Wl,--gc-sections
-RV_CFLAGS += -g -O0
+# RV_CFLAGS += -O3 -Wl,--gc-sections
+RV_CFLAGS += -g -O0 -Wl,--gc-sections
 
-RV_DIS_FLAGS = -d -S -M no-aliases
+RV_DIS_FLAGS = -S -M no-aliases
 
 all: rv_emu torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf
 
@@ -54,15 +54,22 @@ $(BUILD_DIR):
 $(BUILD_DIR)/init.o: init.S $(BUILD_DIR)
 	$(RV_GCC) -c $(RV_CFLAGS) init.S -o $(BUILD_DIR)/init.o
 
-$(BUILD_DIR)/prog01.elf: prog01.c $(BUILD_DIR)/init.o
-	$(RV_GCC) -c $(RV_CFLAGS) prog01.c -o $(BUILD_DIR)/prog01.o	
-	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/prog01.o -o $(BUILD_DIR)/prog01.elf
+$(BUILD_DIR)/system.o: system.o $(BUILD_DIR)
+	$(RV_GCC) -c $(RV_CFLAGS) system.c -o $(BUILD_DIR)/system.o
+
+RV_COMMON_OBJS = $(BUILD_DIR)/init.o $(BUILD_DIR)/system.o
+
+$(BUILD_DIR)/prog01.elf: prog01.c $(RV_COMMON_OBJS)
+	$(RV_GCC) -c $(RV_CFLAGS) prog01.c -o $(BUILD_DIR)/prog01.o
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o $(BUILD_DIR)/prog01.o -o $(BUILD_DIR)/prog01.elf
 	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog01.bin
 	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog01.elf > $(BUILD_DIR)/prog01.S
 
-$(BUILD_DIR)/prog02.elf: prog02.c $(BUILD_DIR)/init.o
+$(BUILD_DIR)/prog02.elf: prog02.c $(RV_COMMON_OBJS)
 	$(RV_GCC) -c $(RV_CFLAGS) prog02.c -o $(BUILD_DIR)/prog02.o	
-	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/prog02.o -lm -o $(BUILD_DIR)/prog02.elf
+	$(RV_GCC) -c $(RV_CFLAGS) printf.c -o $(BUILD_DIR)/printf.o	
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o $(BUILD_DIR)/printf.o \
+			  $(BUILD_DIR)/prog02.o -lm -o $(BUILD_DIR)/prog02.elf
 	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog02.bin
 	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog02.elf > $(BUILD_DIR)/prog02.S
 

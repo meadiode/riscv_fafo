@@ -182,6 +182,25 @@ bool device_read(device_t *dev, uint32_t addr, uint8_t *data, uint32_t size)
 }
 
 
+void device_set_reg(device_t *dev, int rd, uint32_t val)
+{
+    dev->regs[rd] = val;
+
+    switch (rd)
+    {
+    case 23:
+        printf("s7 is set to 0x%08X\n", val);
+        break;
+
+    case 10:
+        printf("a0 is set to 0x%08X\n", val);
+        break;
+    
+    default:;
+    }
+}
+
+
 bool device_run_cycle(device_t *dev)
 {
     uint32_t inst;
@@ -213,11 +232,11 @@ bool device_run_cycle(device_t *dev)
             switch (funct7)
             {
             case 0x00: /* add */
-                dev->regs[rd] = dev->regs[rs1] + dev->regs[rs2];
+                device_set_reg(dev, rd, dev->regs[rs1] + dev->regs[rs2]);
                 break;
 
             case 0x20: /* sub */
-                dev->regs[rd] = dev->regs[rs1] - dev->regs[rs2];
+                device_set_reg(dev, rd, dev->regs[rs1] - dev->regs[rs2]);
                 break;
 
             default:
@@ -226,22 +245,22 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x04: /* xor */
-            dev->regs[rd] = dev->regs[rs1] ^ dev->regs[rs2];
+            device_set_reg(dev, rd, dev->regs[rs1] ^ dev->regs[rs2]);
             res = funct7 == 0x00;
             break;
 
         case 0x06: /* or */
-            dev->regs[rd] = dev->regs[rs1] | dev->regs[rs2];
+            device_set_reg(dev, rd, dev->regs[rs1] | dev->regs[rs2]);
             res = funct7 == 0x00;
             break;
 
         case 0x07: /* and */
-            dev->regs[rd] = dev->regs[rs1] & dev->regs[rs2];
+            device_set_reg(dev, rd, dev->regs[rs1] & dev->regs[rs2]);
             res = funct7 == 0x00;
             break;
 
         case 0x01: /* sll */
-            dev->regs[rd] = dev->regs[rs1] << dev->regs[rs2];
+            device_set_reg(dev, rd, dev->regs[rs1] << dev->regs[rs2]);
             res = funct7 == 0x00;
             break;
 
@@ -249,11 +268,11 @@ bool device_run_cycle(device_t *dev)
             switch (funct7)
             {
             case 0x00: /* srl */
-                dev->regs[rd] = dev->regs[rs1] >> dev->regs[rs2];
+                device_set_reg(dev, rd, dev->regs[rs1] >> dev->regs[rs2]);
                 break;
 
             case 0x20: /* sra */
-                dev->regs[rd] = (int32_t)dev->regs[rs1] >> dev->regs[rs2];
+                device_set_reg(dev, rd, (int32_t)dev->regs[rs1] >> dev->regs[rs2]);
                 break;
 
             default:
@@ -262,12 +281,12 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* slt */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] < (int32_t)dev->regs[rs2] ? 1 : 0;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < (int32_t)dev->regs[rs2] ? 1 : 0);
             res = funct7 == 0x00;
             break;
 
         case 0x03: /* sltu */
-            dev->regs[rd] = dev->regs[rs1] < dev->regs[rs2] ? 1 : 0;
+            device_set_reg(dev, rd, dev->regs[rs1] < dev->regs[rs2] ? 1 : 0);
             res = funct7 == 0x00;
             break;
 
@@ -290,26 +309,26 @@ bool device_run_cycle(device_t *dev)
         switch (funct3)
         {
         case 0x00:  /* addi */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] + imm;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] + imm);
             break;
 
         case 0x04: /* xori */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] ^ imm;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] ^ imm);
             break;
 
         case 0x06: /* ori */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] | imm;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] | imm);
             break;
 
         case 0x07: /* andi */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] & imm;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] & imm);
             break;
 
         case 0x01:
             switch (imm >> 5)
             {
             case 0x00: /* slli */
-                dev->regs[rd] = dev->regs[rs1] << (imm & 0b11111);
+                device_set_reg(dev, rd, dev->regs[rs1] << (imm & 0b11111));
                 break;
 
             default:    
@@ -321,12 +340,12 @@ bool device_run_cycle(device_t *dev)
             switch (imm >> 5)
             {
             case 0x00: /* srli */
-                dev->regs[rd] = dev->regs[rs1] >> (imm & 0b11111);
+                device_set_reg(dev, rd, dev->regs[rs1] >> (imm & 0b11111));
                 break;
 
             case 0x20: /* srai */
-                dev->regs[rd] = (dev->regs[rs1] >> (imm & 0b11111)) | 
-                                (dev->regs[rs1] & 0x80000000);
+                device_set_reg(dev, rd, (dev->regs[rs1] >> (imm & 0b11111)) | 
+                                        (dev->regs[rs1] & 0x80000000));
                 break;
 
             default:
@@ -335,11 +354,11 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* slti */
-            dev->regs[rd] = (int32_t)dev->regs[rs1] < imm ? 1 : 0;
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < imm ? 1 : 0);
             break;
 
         case 0x03: /* sltiu */
-            dev->regs[rd] = dev->regs[rs1] < ((uint32_t)imm & 0x111111111111) ? 1 : 0;
+            device_set_reg(dev, rd, dev->regs[rs1] < ((uint32_t)imm & 0x111111111111) ? 1 : 0);
             break;
 
         default:
@@ -400,32 +419,32 @@ bool device_run_cycle(device_t *dev)
         case 0x00: /* lb */
             int8_t sb;
             res = device_read(dev, addr, (uint8_t*)&sb, 1);
-            dev->regs[rd] = (int32_t)sb;
+            device_set_reg(dev, rd, (int32_t)sb);
             break;
 
         case 0x01: /* lh */
             int16_t shw;
             res = device_read(dev, addr, (uint8_t*)&shw, 2);
-            dev->regs[rd] = (int32_t)shw;
+            device_set_reg(dev, rd, (int32_t)shw);
             break;
 
         case 0x02: /* lw */
             printf("Addr: 0x%08X\n", addr);
             uint32_t w;
             res = device_read(dev, addr, (uint8_t*)&w, 4);
-            dev->regs[rd] = w;
+            device_set_reg(dev, rd, w);
             break;
 
         case 0x04: /* lbu */
             uint8_t ub;
             res = device_read(dev, addr, &ub, 1);
-            dev->regs[rd] = ub;
+            device_set_reg(dev, rd, ub);
             break;
 
         case 0x05: /* lhu */
             uint16_t hw;
             res = device_read(dev, addr, (uint8_t*)&hw, 2);
-            dev->regs[rd] = hw;
+            device_set_reg(dev, rd, hw);
             break;
 
         default:
@@ -516,7 +535,7 @@ bool device_run_cycle(device_t *dev)
         imm |= (inst >> 31) << 20;
         imm = (imm << 11) >> 11;
 
-        dev->regs[rd] = dev->pc + 4;
+        device_set_reg(dev, rd, dev->pc + 4);
         dev->pc += imm;
         pc_updated = true;
     }
@@ -533,7 +552,7 @@ bool device_run_cycle(device_t *dev)
         switch (funct3)
         {
         case 0x00:
-            dev->regs[rd] = dev->pc + 4;
+            device_set_reg(dev, rd, dev->pc + 4);
             dev->pc = dev->regs[rs1] + imm;
             pc_updated = true;
         break;
@@ -552,7 +571,7 @@ bool device_run_cycle(device_t *dev)
         int32_t imm = (inst >> 12) & 0xfffff;
         imm = (imm << 11) >> 11;
         
-        dev->regs[rd] = imm << 12;
+        device_set_reg(dev, rd, imm << 12);
     }
     break;
 
@@ -563,6 +582,32 @@ bool device_run_cycle(device_t *dev)
         imm = (imm << 11) >> 11;
 
         dev->regs[rd] = dev->pc + (imm << 12);
+    }
+    break;
+
+    case 0b1110011:
+    {
+        uint32_t funct12 = (inst >> 20) & 0b111111111111;
+        uint32_t rs1 = (inst >> 15) & 0b11111;
+        uint32_t funct3 = (inst >> 12) & 0b111;
+        uint32_t rd = (inst >> 7) & 0b11111;
+        res = (rs1 == funct3) == (rd == 0x0);
+
+        switch (funct12)
+        {
+        case 0x00:
+            printf("<<< ECALL >>>\n");
+            break;
+
+        case 0x01:
+            printf("<<< BREAK >>>\n");
+            break;
+
+        default:
+            printf("Error: invalid I-type instruction 0x%08X\n", inst);
+            res = false;
+            break;
+        }
     }
     break;
 
@@ -613,7 +658,10 @@ int main(int argc, char **argv)
     fread(prog_table, sizeof(prog_hdr_t), elf_hdr.phnum, elf);
 
 
-    device_init(&dev, 1024 * 20, 0x08000000, 1024 * 8, 0x20000000, 4, 0x01000000);
+    device_init(&dev,
+                1024 * 200,         0x08000000,   /* FLASH */
+                1024 * 8,           0x20000000,   /* RAM */
+                4 + 320 * 240 * 3,  0x01000000);  /* Peripherals: serial tx/rx, screen buffer 320x240 */
 
     for (int i = 0; i < elf_hdr.phnum; i++)
     {
@@ -694,31 +742,43 @@ int main(int argc, char **argv)
 
     printf("_exit address: 0x%08X\n", exit_addr);
 
-    for (int i = 0; i < 10000; i++)
+
+    char prog_output[1024] = {0};
+    int prog_output_n = 0;
+
+    for (int i = 0; i < 1000000; i++)
     {
         if (!device_run_cycle(&dev))
         {
             printf("Error!\n");
             break;
         }
+        else
+        {
+            /* The program has something to say */
+            if (dev.periph.data[1] && prog_output_n < (sizeof(prog_output) - 1))
+            {
+                dev.periph.data[1] = 0;
+                prog_output[prog_output_n++] = dev.periph.data[0];
+
+                // if (prog_output[prog_output_n - 1] == '\n')
+                // {
+                //     printf("PROG OUTPUT: %s", prog_output);
+                //     memset(prog_output, 0, sizeof(prog_output));
+                //     prog_output_n = 0;
+                // }
+            }
+        }
 
         if (dev.pc == exit_addr)
         {
             printf("Program done!\n");
             printf("Elapsed CPU cycles: %lu\n", dev.elapsed_cycles);
-            printf("Output bytes: ");
             
-            for (int j = 0; j < 4; j++)
-            {
-                printf(" 0x%02X", dev.periph.data[j]);
-            }
-            printf("\n");
+            printf("PROG OUTPUT: %s\n", prog_output);
 
             break;
         }
     }
 
 }
-
-
-

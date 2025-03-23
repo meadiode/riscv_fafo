@@ -1,6 +1,6 @@
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 20K
+    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 200K
     RAM (xrw)   : ORIGIN = 0x20000000, LENGTH = 8K
 }
 
@@ -31,6 +31,7 @@ SECTIONS
         PROVIDE(__global_pointer$ = . + 2K);
         *(.bss)
         _end = .;
+        __heap_start = .;
     } > RAM
 
     .stack (NOLOAD) : {
@@ -38,12 +39,6 @@ SECTIONS
         __stack_start = ORIGIN(RAM) + LENGTH(RAM) - STACK_SIZE - 16;
         . = . + STACK_SIZE;
         __stack_end = ORIGIN(RAM) + LENGTH(RAM) - 16;
+        __heap_end = __stack_start;
     } > RAM
-
-    /* Discard unnecessary sections */
-    /DISCARD/ : {
-        *(.comment)
-       /* *(.eh_frame) */
-        *(.note*)
-    }
 }

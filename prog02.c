@@ -1,13 +1,17 @@
 
 #include <stdint.h>
+#include "printf.h"
 
-#define OUTPUT  ((char*)0x01000000)
-
-volatile float foo = 0.0;
-volatile float bar = 12.324;
+volatile float foo = 1.0;
 
 int main(void)
 {
-    foo = 42.69;
-    foo /= bar;
+    const float N = 1.42069;
+
+    printf("\n");
+    for (int i = 0; i < 10; i++)
+    {
+        printf("foo^%d = %0.8f\n", i, foo);
+        foo *= N;
+    }
 }
