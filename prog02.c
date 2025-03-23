@@ -1,5 +1,6 @@
 
 #include <stdint.h>
+#include "system.h"
 #include "printf.h"
 
 volatile float foo = 1.0;
@@ -11,7 +12,7 @@ int main(void)
     printf("\n");
     for (int i = 0; i < 10; i++)
     {
-        printf("foo^%d = %0.8f\n", i, foo);
+        printf("N^%d = %0.8f\n", i, foo);
         foo *= N;
     }
 }

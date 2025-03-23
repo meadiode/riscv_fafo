@@ -1,108 +1,9 @@
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <math.h>
+#include "rv_emu.h"
 
-typedef struct 
-{
-    struct
-    {
-        uint8_t magic[4];
-        uint8_t bitness;
-        uint8_t data;
-        uint8_t version;
-        uint8_t os_abi;
-        uint8_t abi_ver;
-        uint8_t pad[7];
+static bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size);
+static bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size);
 
-    } e_ident;
-
-    uint16_t type;
-    uint16_t machine;
-    uint32_t version;
-    
-    uint32_t entry;
-    uint32_t phoff;
-    uint32_t shoff;
-    uint32_t flags;
-    uint16_t ehsize;
-    uint16_t phentsize;
-    uint16_t phnum;
-    uint16_t shentsize;
-    uint16_t shnum;
-    uint16_t shstrndx;
-
-} elf_hdr_t;
-
-
-typedef struct
-{
-    uint32_t type;
-    uint32_t offset;
-    uint32_t vaddr;
-    uint32_t paddr;
-    uint32_t filesz;
-    uint32_t memsz;
-    uint32_t flags;
-    uint32_t align;
-
-} prog_hdr_t;
-
-
-typedef struct
-{
-    uint32_t name;
-    uint32_t type;
-    uint32_t flags;
-    uint32_t addr;
-    uint32_t offset;
-    uint32_t size;
-    uint32_t link;
-    uint32_t info;
-    uint32_t addralign;
-    uint32_t entsize;
-
-} sec_hdr_t;
-
-
-typedef struct
-{
-    uint32_t name;
-    uint32_t value;
-    uint32_t size;
-    uint8_t  info;
-    uint8_t  other;
-    uint16_t shndx;
-
-} sym_t;
-
-
-typedef struct
-{
-    uint32_t origin;
-    uint32_t size;
-    uint8_t *data;
-
-} mem_t;
-
-
-typedef struct
-{
-    uint32_t regs[32];
-    uint32_t pc;
-    uint64_t elapsed_cycles;
-
-    mem_t rom;
-    mem_t ram;
-    mem_t periph;
-
-} device_t;
-
-
-static device_t dev = {0};
 
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
@@ -135,7 +36,7 @@ void device_uninit(device_t *dev)
 }
 
 
-bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size)
+static bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size)
 {
     if (addr >= mem->origin)
     {
@@ -150,7 +51,7 @@ bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size)
 }
 
 
-bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size)
+static bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size)
 {
     if (addr >= mem->origin)
     {
@@ -185,19 +86,6 @@ bool device_read(device_t *dev, uint32_t addr, uint8_t *data, uint32_t size)
 void device_set_reg(device_t *dev, int rd, uint32_t val)
 {
     dev->regs[rd] = val;
-
-    switch (rd)
-    {
-    case 23:
-        printf("s7 is set to 0x%08X\n", val);
-        break;
-
-    case 10:
-        printf("a0 is set to 0x%08X\n", val);
-        break;
-    
-    default:;
-    }
 }
 
 
@@ -210,7 +98,7 @@ bool device_run_cycle(device_t *dev)
         return false;
     }
 
-    printf("Executing 0x%08X at 0x%08X\n", inst, dev->pc);
+    // printf("Executing 0x%08X at 0x%08X\n", inst, dev->pc);
 
     uint32_t opcode = inst & 0b1111111;
     bool res = true;
@@ -344,8 +232,7 @@ bool device_run_cycle(device_t *dev)
                 break;
 
             case 0x20: /* srai */
-                device_set_reg(dev, rd, (dev->regs[rs1] >> (imm & 0b11111)) | 
-                                        (dev->regs[rs1] & 0x80000000));
+                device_set_reg(dev, rd, ((int32_t)(dev->regs[rs1]) >> (imm & 0b11111)));
                 break;
 
             default:
@@ -393,7 +280,7 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* sw */
-            printf("Addr: 0x%08X\n", addr);
+            // printf("Addr: 0x%08X\n", addr);
             res = device_write(dev, addr, (uint8_t*)&dev->regs[rs2], 4);
             break;
 
@@ -429,7 +316,7 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* lw */
-            printf("Addr: 0x%08X\n", addr);
+            // printf("Addr: 0x%08X\n", addr);
             uint32_t w;
             res = device_read(dev, addr, (uint8_t*)&w, 4);
             device_set_reg(dev, rd, w);
@@ -596,11 +483,11 @@ bool device_run_cycle(device_t *dev)
         switch (funct12)
         {
         case 0x00:
-            printf("<<< ECALL >>>\n");
+            // printf("<<< ECALL >>>\n");
             break;
 
         case 0x01:
-            printf("<<< BREAK >>>\n");
+            // printf("<<< BREAK >>>\n");
             break;
 
         default:
@@ -630,155 +517,4 @@ bool device_run_cycle(device_t *dev)
     dev->elapsed_cycles++;
 
     return res;
-}
-
-
-int main(int argc, char **argv)
-{
-    if (argc <= 1)
-    {
-        printf("Error: a 32-bit ELF file is expected as argument\n");
-        exit(-1);
-    }
-
-    FILE *elf = fopen(argv[1], "rb");
-
-    elf_hdr_t elf_hdr = {0};
-
-    fread(&elf_hdr, 1, sizeof(elf_hdr), elf);
-
-    if (elf_hdr.machine != 0x00f3 || elf_hdr.e_ident.bitness != 1)
-    {
-        printf("Error: this ELF file is not RISC-V 32bit\n");
-        fclose(elf);
-        exit(-1);
-    }
-
-    prog_hdr_t *prog_table = malloc(sizeof(prog_hdr_t) * elf_hdr.phnum);
-    fread(prog_table, sizeof(prog_hdr_t), elf_hdr.phnum, elf);
-
-
-    device_init(&dev,
-                1024 * 200,         0x08000000,   /* FLASH */
-                1024 * 8,           0x20000000,   /* RAM */
-                4 + 320 * 240 * 3,  0x01000000);  /* Peripherals: serial tx/rx, screen buffer 320x240 */
-
-    for (int i = 0; i < elf_hdr.phnum; i++)
-    {
-        if (prog_table[i].type == 1) /* PT_LOAD */
-        {
-            fseek(elf, prog_table[i].offset, SEEK_SET);
-            for (int j = 0; j < prog_table[i].memsz; j++)
-            {
-                uint8_t b;
-                fread(&b, 1, 1, elf);
-                if (!device_write(&dev, prog_table[i].vaddr + j, &b, 1))
-                {
-                    printf("Error writing to the device address: 0x%08X\n", prog_table[i].vaddr + j);
-                    break;
-                }
-            }
-        }
-    }
-
-    fseek(elf, elf_hdr.shoff, SEEK_SET);
-
-    sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
-    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
-    int strtab_id = -1;
-    int symtab_id = -1;
-
-    /* Find string and symbol table indices */
-    for (int i = 0; i < elf_hdr.shnum; i++)
-    {
-        fseek(elf, sec_table[elf_hdr.shstrndx].offset + sec_table[i].name, SEEK_SET);
-        char sname[16] = {0};
-        fread(sname, 1, sizeof(".strtab"), elf);
-
-        if (sec_table[i].type == 0x03 && !strcmp(".strtab", sname))
-        {
-            strtab_id = i;
-        }
-        else if (sec_table[i].type == 0x02 && !strcmp(".symtab", sname))
-        {
-            symtab_id = i;
-        }
-    }
-
-    /* Find the _exit symbol address */
-    fseek(elf, sec_table[symtab_id].offset, SEEK_SET);
-    sym_t *symbols = malloc(sec_table[symtab_id].size);
-    fread(symbols, 1, sec_table[symtab_id].size, elf);
-
-    uint32_t exit_addr = 0x0;
-
-    for (int i = 0; i < sec_table[symtab_id].size / sizeof(sym_t); i++)
-    {
-        if ((symbols[i].info & 0x0f) == 0x02) /* STT_FUNC */
-        {
-            char sname[200] = {0};
-            int ssize = 0;
-            char c = 0;
-            fseek(elf, sec_table[strtab_id].offset + symbols[i].name, SEEK_SET);
-            do
-            {
-                fread(&c, 1, 1, elf);
-                sname[ssize++] = c;
-            }
-            while(c);
-
-            if (!strcmp("_exit", sname))
-            {
-                exit_addr = symbols[i].value;
-                break;
-            }
-        }
-    }
-
-    fclose(elf);
-    free(prog_table);
-    free(sec_table);
-    free(symbols);
-
-    printf("_exit address: 0x%08X\n", exit_addr);
-
-
-    char prog_output[1024] = {0};
-    int prog_output_n = 0;
-
-    for (int i = 0; i < 1000000; i++)
-    {
-        if (!device_run_cycle(&dev))
-        {
-            printf("Error!\n");
-            break;
-        }
-        else
-        {
-            /* The program has something to say */
-            if (dev.periph.data[1] && prog_output_n < (sizeof(prog_output) - 1))
-            {
-                dev.periph.data[1] = 0;
-                prog_output[prog_output_n++] = dev.periph.data[0];
-
-                // if (prog_output[prog_output_n - 1] == '\n')
-                // {
-                //     printf("PROG OUTPUT: %s", prog_output);
-                //     memset(prog_output, 0, sizeof(prog_output));
-                //     prog_output_n = 0;
-                // }
-            }
-        }
-
-        if (dev.pc == exit_addr)
-        {
-            printf("Program done!\n");
-            printf("Elapsed CPU cycles: %lu\n", dev.elapsed_cycles);
-            
-            printf("PROG OUTPUT: %s\n", prog_output);
-
-            break;
-        }
-    }
-
 }

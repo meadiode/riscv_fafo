@@ -25,7 +25,7 @@ void *_sbrk_r(void *reent_ptr, int nbytes)
 }
 
 
-void _putchar(int c)
+void _putchar(char c)
 {
     TX_DATA[0] = (char)c;
     TX_FLAG[0] = 1;

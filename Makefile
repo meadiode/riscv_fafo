@@ -32,16 +32,17 @@ RV_OBJDUMP = $(RV_CROSSCOMP)objdump
 
 
 RV_CFLAGS = -march=rv32i -mabi=ilp32
-# RV_CFLAGS += -O3 -Wl,--gc-sections
-RV_CFLAGS += -g -O0 -Wl,--gc-sections
+RV_CFLAGS += -O3 -Wl,--gc-sections
+# RV_CFLAGS += -g -O0 -Wl,--gc-sections
 
 RV_DIS_FLAGS = -S -M no-aliases
 
-all: rv_emu torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf
+all: device torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog04.elf
 
-rv_emu: rv_emu.c $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/rv_emu.o $<
-	$(GCC) -o $@ $(BUILD_DIR)/rv_emu.o $(CFLAGS) $(LDFLAGS) -lm
+device: device.c rv_emu.c $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/device.o device.c
+	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/rv_emu.o rv_emu.c
+	$(GCC) -o $@ $(BUILD_DIR)/device.o $(BUILD_DIR)/rv_emu.o $(CFLAGS) $(LDFLAGS) -lraylib -lm
 
 torus: torus.c $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/torus.o $<
@@ -54,7 +55,7 @@ $(BUILD_DIR):
 $(BUILD_DIR)/init.o: init.S $(BUILD_DIR)
 	$(RV_GCC) -c $(RV_CFLAGS) init.S -o $(BUILD_DIR)/init.o
 
-$(BUILD_DIR)/system.o: system.o $(BUILD_DIR)
+$(BUILD_DIR)/system.o: system.c $(BUILD_DIR)
 	$(RV_GCC) -c $(RV_CFLAGS) system.c -o $(BUILD_DIR)/system.o
 
 RV_COMMON_OBJS = $(BUILD_DIR)/init.o $(BUILD_DIR)/system.o
@@ -73,9 +74,23 @@ $(BUILD_DIR)/prog02.elf: prog02.c $(RV_COMMON_OBJS)
 	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog02.bin
 	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog02.elf > $(BUILD_DIR)/prog02.S
 
+$(BUILD_DIR)/prog03.elf: prog03.c $(RV_COMMON_OBJS)
+	$(RV_GCC) -c $(RV_CFLAGS) prog03.c -o $(BUILD_DIR)/prog03.o	
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o \
+			  $(BUILD_DIR)/prog03.o -lm -o $(BUILD_DIR)/prog03.elf
+	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog03.elf $(BUILD_DIR)/prog03.bin
+	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog03.elf > $(BUILD_DIR)/prog03.S
+
+$(BUILD_DIR)/prog04.elf: prog04.c $(RV_COMMON_OBJS)
+	$(RV_GCC) -c $(RV_CFLAGS) prog04.c -o $(BUILD_DIR)/prog04.o	
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o $(BUILD_DIR)/printf.o \
+			  $(BUILD_DIR)/prog04.o -lm -o $(BUILD_DIR)/prog04.elf
+	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog04.elf $(BUILD_DIR)/prog04.bin
+	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog04.elf > $(BUILD_DIR)/prog04.S
+
 clean:
 	$(RM) -rf $(BUILD_DIR)
-	$(RM) -f rv_emu
+	$(RM) -f device
 	$(RM) -f torus
 
 

@@ -2,5 +2,6 @@
 build/*
 *.sublime-project
 *.sublime-workspace
+device
 rv_emu
 torus

@@ -206,7 +206,7 @@ int main(void)
         ImageClearBackground(&canvas, LIGHTGRAY);
         mat_make_tx(tx_mat,
                     160.0, 0.0, 100.0,
-                    45.0 * DEG2RAD, 19 * DEG2RAD + GetTime() * 0.7, GetTime(),
+                    45.0 * DEG2RAD, 19.0 * DEG2RAD + GetTime() * 0.7, GetTime(),
                     160.0, 160.0, 160.0);
         transform_vertices(vertices, tx_mat, tx_verts, N_VERTICES);
 
