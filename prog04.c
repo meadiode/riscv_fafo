@@ -78,7 +78,7 @@ int main(void)
         
             if (it > 0)
             {
-                draw_line(ix, iy, p_ix, p_iy, 0xffffff);
+                draw_line(ix, iy, p_ix, p_iy, 0x00ff00);
             }
 
             p_ix = ix;

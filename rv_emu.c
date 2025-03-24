@@ -280,7 +280,6 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* sw */
-            // printf("Addr: 0x%08X\n", addr);
             res = device_write(dev, addr, (uint8_t*)&dev->regs[rs2], 4);
             break;
 
@@ -316,7 +315,6 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* lw */
-            // printf("Addr: 0x%08X\n", addr);
             uint32_t w;
             res = device_read(dev, addr, (uint8_t*)&w, 4);
             device_set_reg(dev, rd, w);

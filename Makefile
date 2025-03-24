@@ -37,7 +37,7 @@ RV_CFLAGS += -O3 -Wl,--gc-sections
 
 RV_DIS_FLAGS = -S -M no-aliases
 
-all: device torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog04.elf
+all: device torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog05.elf
 
 device: device.c rv_emu.c $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/device.o device.c
@@ -87,6 +87,14 @@ $(BUILD_DIR)/prog04.elf: prog04.c $(RV_COMMON_OBJS)
 			  $(BUILD_DIR)/prog04.o -lm -o $(BUILD_DIR)/prog04.elf
 	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog04.elf $(BUILD_DIR)/prog04.bin
 	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog04.elf > $(BUILD_DIR)/prog04.S
+
+
+$(BUILD_DIR)/prog05.elf: prog05.c $(RV_COMMON_OBJS)
+	$(RV_GCC) -c $(RV_CFLAGS) prog05.c -o $(BUILD_DIR)/prog05.o	
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o $(BUILD_DIR)/printf.o \
+			  $(BUILD_DIR)/prog05.o -lm -o $(BUILD_DIR)/prog05.elf
+	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog05.elf $(BUILD_DIR)/prog05.bin
+	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog05.elf > $(BUILD_DIR)/prog05.S
 
 clean:
 	$(RM) -rf $(BUILD_DIR)

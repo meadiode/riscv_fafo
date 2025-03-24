@@ -113,7 +113,7 @@ int main(int argc, char **argv)
 
     device_init(&dev,
                 1024 * 200,         0x08000000,   /* FLASH */
-                1024 * 16,          0x20000000,   /* RAM */
+                1024 * 32,          0x20000000,   /* RAM */
                 8 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, screen buffer 320x200 */
 
     for (int i = 0; i < elf_hdr.phnum; i++)
@@ -195,7 +195,7 @@ int main(int argc, char **argv)
 
     printf("_exit address: 0x%08X\n", exit_addr);
     
-    InitWindow(400, 400, "RISC-V device");
+    InitWindow(640, 400, "RISC-V device");
 
     Image canvas = {0};
     canvas = GenImageColor(DISP_WIDTH, DISP_HEIGHT, LIGHTGRAY);
@@ -265,7 +265,9 @@ int main(int argc, char **argv)
         }
 
         UpdateTexture(tex, canvas.data);
-        DrawTexture(tex, 40, 100, WHITE);
+        DrawTexturePro(tex, (Rectangle){0.0, 0.0, 320.0, 200.0},
+                       (Rectangle){0.0, 0.0, 640.0, 400.0},
+                       (Vector2){0.0, 0.0}, 0.0, WHITE);
         DrawFPS(10, 10);
         EndDrawing();
     
