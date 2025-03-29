@@ -30,6 +30,7 @@ SECTIONS
         __bss_start = .;
         PROVIDE(__global_pointer$ = . + 2K);
         *(.bss)
+        *(.sbss)
         _end = .;
         __heap_start = .;
     } > RAM

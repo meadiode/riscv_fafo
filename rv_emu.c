@@ -14,14 +14,17 @@ void device_init(device_t *dev,
     dev->rom.origin = rom_origin;
     dev->rom.size = rom_size;
     dev->rom.data = malloc(rom_size);
+    memset(dev->rom.data, 0, rom_size);
 
     dev->ram.origin = ram_origin;
     dev->ram.size = ram_size;
     dev->ram.data = malloc(ram_size);
+    memset(dev->ram.data, 0, ram_size);
 
     dev->periph.origin = periph_origin;
     dev->periph.size = periph_size;
     dev->periph.data = malloc(periph_size);
+    memset(dev->periph.data, 0, periph_size);
 
     dev->pc = dev->rom.origin;
 }
@@ -281,6 +284,8 @@ bool device_run_cycle(device_t *dev)
 
         case 0x02: /* sw */
             res = device_write(dev, addr, (uint8_t*)&dev->regs[rs2], 4);
+            // printf("sw: addr: 0x%08X data: 0x%08X\n", addr, dev->regs[rs2]);
+
             break;
 
         default:
@@ -318,6 +323,7 @@ bool device_run_cycle(device_t *dev)
             uint32_t w;
             res = device_read(dev, addr, (uint8_t*)&w, 4);
             device_set_reg(dev, rd, w);
+            // printf("lw: addr: 0x%08X data: 0x%08X\n", addr, w);
             break;
 
         case 0x04: /* lbu */

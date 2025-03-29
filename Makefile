@@ -20,7 +20,8 @@ STRIP   =  strip
 INCLUDE_PATHS = -I. -I$(RAYLIB_PATH)/src -I$(RAYLIB_PATH)/src/external
 
 CFLAGS = -Wall -std=c99 -D_DEFAULT_SOURCE -Wno-missing-braces -Wunused-result
-CFLAGS += -g -D_DEBUG
+CFLAGS += -O3
+# CFLAGS += -g -D_DEBUG
 
 LDFLAGS = 
 
@@ -37,7 +38,12 @@ RV_CFLAGS += -O3 -Wl,--gc-sections
 
 RV_DIS_FLAGS = -S -M no-aliases
 
-all: device torus $(BUILD_DIR)/prog01.elf $(BUILD_DIR)/prog02.elf $(BUILD_DIR)/prog05.elf
+all: device torus \
+	$(BUILD_DIR)/prog01.elf \
+	$(BUILD_DIR)/prog02.elf \
+	$(BUILD_DIR)/prog03.elf \
+	$(BUILD_DIR)/prog04.elf \
+	$(BUILD_DIR)/prog05.elf
 
 device: device.c rv_emu.c $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/device.o device.c

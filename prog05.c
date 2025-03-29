@@ -197,7 +197,7 @@ int main(void)
 
     for (int i = 0; i < 10000; i++)
     {
-        memset((char*)(DISP_VRAM_ADDR), 0x28, DISP_VRAM_SIZE);
+        memset((char*)(DISP_VRAM_ADDR), 0xff, DISP_VRAM_SIZE);
         
         mat_make_tx(tx_mat,
                     160.0, 0.0, 100.0,
@@ -217,7 +217,7 @@ int main(void)
             int px2 = (int)(tx_verts[idx2 * 3 + 0]);
             int py2 = (int)(tx_verts[idx2 * 3 + 2]);
 
-            draw_line(px1, py1, px2, py2, 0xffffff);
+            draw_line(px1, py1, px2, py2, 0x202020);
         }
         DISP_FLUSH();
 

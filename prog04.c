@@ -69,7 +69,7 @@ int main(void)
         int p_ix = 0;
         int p_iy = 0;
 
-        memset((char*)(DISP_VRAM_ADDR), 0x28, DISP_VRAM_SIZE);
+        memset((char*)(DISP_VRAM_ADDR), 0xff, DISP_VRAM_SIZE);
 
         for (int it = 0; it <= N_POINTS; it++)
         {
@@ -78,7 +78,7 @@ int main(void)
         
             if (it > 0)
             {
-                draw_line(ix, iy, p_ix, p_iy, 0x00ff00);
+                draw_line(ix, iy, p_ix, p_iy, 0x202020);
             }
 
             p_ix = ix;

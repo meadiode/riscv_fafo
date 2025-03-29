@@ -1,6 +1,12 @@
 
+# Experiments with a minimal RISC-V emulator
 
- ## GCC toolchain
+The emulator:
+ - Base RV32I instructions only
+ - Bare implementation of: serial output, 320x200 display, RTC
+ - Can run DOOM
+
+## RISC-V GCC toolchain
 
 Clone https://github.com/riscv-collab/riscv-gnu-toolchain.git
 

@@ -12,13 +12,15 @@ int main(void)
 
     for (int i = 0; i < 200; i++)
     {
-        memset((char*)(DISP_VRAM_ADDR), 0x28, DISP_VRAM_SIZE);
+        memset((char*)(DISP_VRAM_ADDR), 0xff, DISP_VRAM_SIZE);
 
         for (int ix = 0; ix < DISP_WIDTH; ix++)
         {
             float y = sinf(t + ((float)ix / (float)DISP_WIDTH) * M_PI * 3.0);
             int iy = DISP_HEIGHT / 2 + (int)(y * (DISP_HEIGHT / 2 - 10));
-            DISP_SET_PIXEL_G(ix, iy, 0xff);
+            DISP_SET_PIXEL_R(ix, iy, 0x20);
+            DISP_SET_PIXEL_G(ix, iy, 0x20);
+            DISP_SET_PIXEL_B(ix, iy, 0x20);
         }
         DISP_FLUSH();
 

@@ -44,20 +44,6 @@ typedef struct
 
 typedef struct
 {
-    uint32_t type;
-    uint32_t offset;
-    uint32_t vaddr;
-    uint32_t paddr;
-    uint32_t filesz;
-    uint32_t memsz;
-    uint32_t flags;
-    uint32_t align;
-
-} prog_hdr_t;
-
-
-typedef struct
-{
     uint32_t name;
     uint32_t type;
     uint32_t flags;
@@ -96,6 +82,12 @@ int main(int argc, char **argv)
 
     FILE *elf = fopen(argv[1], "rb");
 
+    if (!elf)
+    {
+        printf("Error: unable to open '%s'\n", argv[1]);
+        exit(-1);
+    }
+
     elf_hdr_t elf_hdr = {0};
 
     fread(&elf_hdr, 1, sizeof(elf_hdr), elf);
@@ -107,37 +99,36 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
-    prog_hdr_t *prog_table = malloc(sizeof(prog_hdr_t) * elf_hdr.phnum);
-    fread(prog_table, sizeof(prog_hdr_t), elf_hdr.phnum, elf);
-
-
     device_init(&dev,
-                1024 * 200,         0x08000000,   /* FLASH */
-                1024 * 32,          0x20000000,   /* RAM */
-                8 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, screen buffer 320x200 */
+                1024 * 1024 * 16,   0x08000000,    /* FLASH */
+                1024 * 1024 * 8,    0x20000000,    /* RAM */
+                64 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, RTC, screen buffer 320x200 */
 
-    for (int i = 0; i < elf_hdr.phnum; i++)
+    fseek(elf, elf_hdr.shoff, SEEK_SET);
+
+    sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
+    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
+    
+    for (int i = 0; i < elf_hdr.shnum; i++)
     {
-        if (prog_table[i].type == 1) /* PT_LOAD */
+        if (sec_table[i].type == 1) /* SHT_PROGBITS */
         {
-            fseek(elf, prog_table[i].offset, SEEK_SET);
-            for (int j = 0; j < prog_table[i].memsz; j++)
+            fseek(elf, sec_table[i].offset, SEEK_SET);
+
+            printf("Writing block of size %u to RAM addr: 0x%08X\n", sec_table[i].size, sec_table[i].addr);
+            for (int j = 0; j < sec_table[i].size; j++)
             {
                 uint8_t b;
                 fread(&b, 1, 1, elf);
-                if (!device_write(&dev, prog_table[i].vaddr + j, &b, 1))
+                if (!device_write(&dev, sec_table[i].addr + j, &b, 1))
                 {
-                    printf("Error writing to the device address: 0x%08X\n", prog_table[i].vaddr + j);
+                    printf("Error writing to the device address: 0x%08X\n", sec_table[i].addr + j);
                     break;
                 }
             }
         }
     }
 
-    fseek(elf, elf_hdr.shoff, SEEK_SET);
-
-    sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
-    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
     int strtab_id = -1;
     int symtab_id = -1;
 
@@ -189,7 +180,6 @@ int main(int argc, char **argv)
     }
 
     fclose(elf);
-    free(prog_table);
     free(sec_table);
     free(symbols);
 
@@ -199,7 +189,7 @@ int main(int argc, char **argv)
 
     Image canvas = {0};
     canvas = GenImageColor(DISP_WIDTH, DISP_HEIGHT, LIGHTGRAY);
-    ImageFormat(&canvas, PIXELFORMAT_UNCOMPRESSED_R8G8B8);
+    ImageFormat(&canvas, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
 
     ImageClearBackground(&canvas, LIGHTGRAY);
     Texture2D tex = LoadTextureFromImage(canvas);
@@ -242,13 +232,20 @@ int main(int argc, char **argv)
                 }
 
                 /* The program has something to show */
-                if (dev.periph.data[4])
+                if (dev.periph.data[0x24])
                 {
-                    dev.periph.data[4] = 0;
-                    memcpy(canvas.data, &dev.periph.data[8], DISP_VRAM_SIZE);
+                    dev.periph.data[0x24] = 0;
+                    memcpy(canvas.data, &dev.periph.data[0x28], DISP_VRAM_SIZE);
                     printf("Frame CPU cycles: %lu\n", dev.elapsed_cycles - frame_start_cycles);
                     fflush(stdout);
                     break;
+                }
+
+                /* The program wants to know what time is it */
+                if (dev.periph.data[0x0c])
+                {
+                    dev.periph.data[0x0c] = 0;
+                    *((uint32_t*)&dev.periph.data[0x04]) = (uint32_t)(GetTime() * 1000.0);
                 }
             }
 
