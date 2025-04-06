@@ -20,6 +20,7 @@ typedef struct
 {
     uint32_t regs[32];
     uint32_t pc;
+    uint32_t exit_addr;
     uint64_t elapsed_cycles;
 
     mem_t rom;
@@ -29,10 +30,71 @@ typedef struct
 } device_t;
 
 
+typedef struct 
+{
+    struct
+    {
+        uint8_t magic[4];
+        uint8_t bitness;
+        uint8_t data;
+        uint8_t version;
+        uint8_t os_abi;
+        uint8_t abi_ver;
+        uint8_t pad[7];
+
+    } e_ident;
+
+    uint16_t type;
+    uint16_t machine;
+    uint32_t version;
+    
+    uint32_t entry;
+    uint32_t phoff;
+    uint32_t shoff;
+    uint32_t flags;
+    uint16_t ehsize;
+    uint16_t phentsize;
+    uint16_t phnum;
+    uint16_t shentsize;
+    uint16_t shnum;
+    uint16_t shstrndx;
+
+} elf_hdr_t;
+
+
+typedef struct
+{
+    uint32_t name;
+    uint32_t type;
+    uint32_t flags;
+    uint32_t addr;
+    uint32_t offset;
+    uint32_t size;
+    uint32_t link;
+    uint32_t info;
+    uint32_t addralign;
+    uint32_t entsize;
+
+} sec_hdr_t;
+
+
+typedef struct
+{
+    uint32_t name;
+    uint32_t value;
+    uint32_t size;
+    uint8_t  info;
+    uint8_t  other;
+    uint16_t shndx;
+
+} sym_t;
+
+
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
                  uint32_t ram_size, uint32_t ram_origin,
                  uint32_t periph_size, uint32_t periph_origin);
+bool device_load_from_elf(device_t *dev, const char *elf_file_name);
 void device_uninit(device_t *dev);
 bool device_write(device_t *dev, uint32_t addr, const uint8_t *data, uint32_t size);
 bool device_read(device_t *dev, uint32_t addr, uint8_t *data, uint32_t size);

@@ -1,8 +1,10 @@
 
 #include "rv_emu.h"
 
-static bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size);
-static bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size);
+static bool mem_write(mem_t *mem, uint32_t addr,
+                      const uint8_t *data, uint32_t size);
+static bool mem_read(mem_t *mem, uint32_t addr,
+                     uint8_t *data, uint32_t size);
 
 
 void device_init(device_t *dev,
@@ -39,7 +41,114 @@ void device_uninit(device_t *dev)
 }
 
 
-static bool mem_write(mem_t *mem, uint32_t addr, const uint8_t *data, uint32_t size)
+bool device_load_from_elf(device_t *dev, const char *elf_file_name)
+{
+    FILE *elf = fopen(elf_file_name, "rb");
+
+    if (!elf)
+    {
+        printf("Error: unable to open '%s'\n", elf_file_name);
+        return false;
+    }
+
+    elf_hdr_t elf_hdr = {0};
+
+    fread(&elf_hdr, 1, sizeof(elf_hdr), elf);
+
+    if (elf_hdr.machine != 0x00f3 || elf_hdr.e_ident.bitness != 1)
+    {
+        printf("Error: this ELF file is not RISC-V 32bit\n");
+        fclose(elf);
+        return false;
+    }
+
+    fseek(elf, elf_hdr.shoff, SEEK_SET);
+
+    sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
+    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
+    
+    for (int i = 0; i < elf_hdr.shnum; i++)
+    {
+        if (sec_table[i].type == 1) /* SHT_PROGBITS */
+        {
+            fseek(elf, sec_table[i].offset, SEEK_SET);
+
+            printf("Writing block of size %u to RAM addr: 0x%08X\n",
+                   sec_table[i].size, sec_table[i].addr);
+            for (int j = 0; j < sec_table[i].size; j++)
+            {
+                uint8_t b;
+                fread(&b, 1, 1, elf);
+                if (!device_write(dev, sec_table[i].addr + j, &b, 1))
+                {
+                    printf("Error writing to the device address: 0x%08X\n",
+                           sec_table[i].addr + j);
+                    break;
+                }
+            }
+        }
+    }
+
+    int strtab_id = -1;
+    int symtab_id = -1;
+
+    /* Find string and symbol table indices */
+    for (int i = 0; i < elf_hdr.shnum; i++)
+    {
+        fseek(elf,
+              sec_table[elf_hdr.shstrndx].offset + sec_table[i].name, SEEK_SET);
+        char sname[16] = {0};
+        fread(sname, 1, sizeof(".strtab"), elf);
+
+        if (sec_table[i].type == 0x03 && !strcmp(".strtab", sname))
+        {
+            strtab_id = i;
+        }
+        else if (sec_table[i].type == 0x02 && !strcmp(".symtab", sname))
+        {
+            symtab_id = i;
+        }
+    }
+
+    /* Find the _exit symbol address */
+    fseek(elf, sec_table[symtab_id].offset, SEEK_SET);
+    sym_t *symbols = malloc(sec_table[symtab_id].size);
+    fread(symbols, 1, sec_table[symtab_id].size, elf);
+
+    for (int i = 0; i < sec_table[symtab_id].size / sizeof(sym_t); i++)
+    {
+        if ((symbols[i].info & 0x0f) == 0x02) /* STT_FUNC */
+        {
+            char sname[200] = {0};
+            int ssize = 0;
+            char c = 0;
+            fseek(elf, sec_table[strtab_id].offset + symbols[i].name, SEEK_SET);
+            do
+            {
+                fread(&c, 1, 1, elf);
+                sname[ssize++] = c;
+            }
+            while(c);
+
+            if (!strcmp("_exit", sname))
+            {
+                dev->exit_addr = symbols[i].value;
+                printf("_exit address: 0x%08X\n", dev->exit_addr);
+                break;
+            }
+        }
+    }
+
+    fclose(elf);
+    free(sec_table);
+    free(symbols);
+
+    return true;
+}
+
+
+static bool mem_write(mem_t *mem, uint32_t addr,
+                      const uint8_t *data, uint32_t size)
 {
     if (addr >= mem->origin)
     {
@@ -70,7 +179,8 @@ static bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size)
 
 
 
-bool device_write(device_t *dev, uint32_t addr, const uint8_t *data, uint32_t size)
+bool device_write(device_t *dev, uint32_t addr,
+                  const uint8_t *data, uint32_t size)
 {
     return mem_write(&dev->ram, addr, data, size) ||
            mem_write(&dev->rom, addr, data, size) ||
@@ -163,7 +273,8 @@ bool device_run_cycle(device_t *dev)
                 break;
 
             case 0x20: /* sra */
-                device_set_reg(dev, rd, (int32_t)dev->regs[rs1] >> dev->regs[rs2]);
+                device_set_reg(dev, rd,
+                               (int32_t)dev->regs[rs1] >> dev->regs[rs2]);
                 break;
 
             default:
@@ -172,7 +283,8 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x02: /* slt */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < (int32_t)dev->regs[rs2] ? 1 : 0);
+            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < \
+                                    (int32_t)dev->regs[rs2] ? 1 : 0);
             res = funct7 == 0x00;
             break;
 
@@ -235,7 +347,8 @@ bool device_run_cycle(device_t *dev)
                 break;
 
             case 0x20: /* srai */
-                device_set_reg(dev, rd, ((int32_t)(dev->regs[rs1]) >> (imm & 0b11111)));
+                device_set_reg(dev, rd,
+                               ((int32_t)(dev->regs[rs1]) >> (imm & 0b11111)));
                 break;
 
             default:
@@ -248,7 +361,8 @@ bool device_run_cycle(device_t *dev)
             break;
 
         case 0x03: /* sltiu */
-            device_set_reg(dev, rd, dev->regs[rs1] < ((uint32_t)imm & 0x111111111111) ? 1 : 0);
+            device_set_reg(dev, rd, dev->regs[rs1] < \
+                                    ((uint32_t)imm & 0x111111111111) ? 1 : 0);
             break;
 
         default:
@@ -510,7 +624,8 @@ bool device_run_cycle(device_t *dev)
 
     if (!res)
     {
-        printf("Error: failed executing instruction: 0x%08X at address 0x%08X\n", inst, dev->pc);
+        printf("Error: failed executing instruction: "
+               "0x%08X at address 0x%08X\n", inst, dev->pc);
     }
 
     if (res && !pc_updated)
