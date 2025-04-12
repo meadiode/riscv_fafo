@@ -5,12 +5,16 @@
 #include <stdint.h>
 #include <rv_emu.h>
 
+#define SUPPORT_TRACELOG        1
+#define SUPPORT_TRACELOG_DEBUG  1
+#include <utils.h>
+
 #include "system.h"
 
 
-#define NUM_CPUS  16
-#define ROM_SIZE  (1024 * 200)
-#define RAM_SIZE  (1024 * 32)
+#define NUM_CPUS  225u
+#define ROM_SIZE  (1024u * 1024u * 16u)
+#define RAM_SIZE  (1024u * 1024u * 8u)
 
 
 typedef struct
@@ -18,54 +22,61 @@ typedef struct
     uint32_t regs[32];
     uint32_t pc;
     uint32_t exit_addr;
-    uint8_t ram[RAM_SIZE];
     uint8_t periph[40];
 
 } cpu_t;
 
 
-#define NUM_DISPS_IN_ROW    4
+#define NUM_DISPS_IN_ROW    15
 #define NUM_DISPS_IN_COLUMN (NUM_CPUS / NUM_DISPS_IN_ROW)
 #define DISP_TEX_WIDTH      (NUM_DISPS_IN_ROW * DISP_WIDTH)
 #define DISP_TEX_HEIGHT     (NUM_DISPS_IN_COLUMN * DISP_HEIGHT)
 
 static uint8_t rom_img[ROM_SIZE] = {0};
+static uint8_t ram_img[RAM_SIZE * NUM_CPUS] = {0};
 static cpu_t cpus[NUM_CPUS] = {0};
-static uint32_t cpu_flags[NUM_CPUS] = {0};
 static device_t dev = {0};
+
+static uint32_t rv_cycles_count = 0;
+static float rv_cycles_time = 0.0;
 
 int main(void)
 {
     InitWindow(1280, 800, "RISC-V device on GPU");
 
     SetExitKey(KEY_F4);
+    SetTraceLogLevel(LOG_DEBUG);
 
     char *rv_emu_code = LoadFileText("./rv_emu.glsl");
     unsigned int rv_emu_shader = rlCompileShader(rv_emu_code, RL_COMPUTE_SHADER);
     unsigned int rv_emu_prog = rlLoadComputeShaderProgram(rv_emu_shader);
     UnloadFileText(rv_emu_code);
 
-    uint32_t n_cycles = 1024;
+    uint32_t n_cycles = 50000;
     int n_cycles_loc = rlGetLocationUniform(rv_emu_prog, "n_cycles");
 
+    uint32_t time_ms = 0;
+    int time_ms_loc = rlGetLocationUniform(rv_emu_prog, "time_ms");
+
     device_init(&dev,
-                1024 * 200,   0x08000000,    /* FLASH */
-                1024 * 32,    0x20000000,    /* RAM */
+                ROM_SIZE,   0x08000000,    /* FLASH */
+                RAM_SIZE,   0x20000000,    /* RAM */
                 40 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, RTC, screen buffer 320x200 */
 
-    device_load_from_elf(&dev, "./build/prog05.elf");
+    // device_load_from_elf(&dev, "./build/prog05.elf");
+    device_load_from_elf(&dev, "./doomgeneric/doomgeneric/doomrv.elf");
 
     memcpy(rom_img, dev.rom.data, dev.rom.size);
 
     for (int i = 0; i < NUM_CPUS; i++)
     {
-        memcpy(cpus[i].ram, dev.ram.data, dev.ram.size);
+        memcpy(ram_img + i * RAM_SIZE, dev.ram.data, RAM_SIZE);
         cpus[i].pc = dev.pc;
     }
 
     unsigned int ssbo_rom = rlLoadShaderBuffer(ROM_SIZE, rom_img, RL_DYNAMIC_COPY);
-    unsigned int ssbo_ram = rlLoadShaderBuffer(sizeof(cpus), cpus, RL_DYNAMIC_COPY);
-    unsigned int ssbo_flags = rlLoadShaderBuffer(sizeof(cpu_flags), cpu_flags, RL_DYNAMIC_COPY);
+    unsigned int ssbo_ram = rlLoadShaderBuffer(sizeof(ram_img), ram_img, RL_DYNAMIC_COPY);
+    unsigned int ssbo_cpus = rlLoadShaderBuffer(sizeof(cpus), cpus, RL_DYNAMIC_COPY);
 
     Image img = GenImageColor(DISP_TEX_WIDTH, DISP_TEX_HEIGHT, GRAY);
     Texture disp_texts[2] = {0};
@@ -74,29 +85,40 @@ int main(void)
     UnloadImage(img);
     int tex_idx = 0;
 
-
     while (!WindowShouldClose())
     {
         
         rlEnableShader(rv_emu_prog);
 
+        time_ms = (uint32_t)(GetTime() * 1000.0);
+        rlSetUniform(time_ms_loc, &time_ms, RL_SHADER_UNIFORM_UINT, 1);
         rlSetUniform(n_cycles_loc, &n_cycles, RL_SHADER_UNIFORM_UINT, 1);
         rlBindImageTexture(disp_texts[tex_idx].id, 0, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, false);
-        rlBindShaderBuffer(ssbo_ram, 1);
+        rlBindShaderBuffer(ssbo_cpus, 1);
         rlBindShaderBuffer(ssbo_rom, 2);
-        rlBindShaderBuffer(ssbo_flags, 3);
+        rlBindShaderBuffer(ssbo_ram, 3);
         rlComputeShaderDispatch(NUM_DISPS_IN_ROW, NUM_DISPS_IN_COLUMN, 1);
         rlDisableShader();
+
+        rv_cycles_count += n_cycles;
+        rv_cycles_time += GetFrameTime();
+
+        if (rv_cycles_time >= 1.0)
+        {
+            printf("GPU CPU cycles per second: %u\n", (uint32_t)((float)rv_cycles_count / rv_cycles_time));
+            rv_cycles_count = 0;
+            rv_cycles_time = 0.0;
+        }
 
         BeginDrawing();
         ClearBackground(WHITE);
 
-        rlReadShaderBuffer(ssbo_flags, cpu_flags, sizeof(cpu_flags), 0);
+        rlReadShaderBuffer(ssbo_cpus, cpus, sizeof(cpus), 0);
 
         bool all_done = true;
         for (int i = 0; i < NUM_CPUS; i++)
         {
-            if (!cpu_flags[i])
+            if (!cpus[i].periph[0x24])
             {
                 all_done = false;
                 break;
@@ -106,8 +128,11 @@ int main(void)
         if (all_done)
         {
             tex_idx = (tex_idx + 1) % 2;
-            memset(cpu_flags, 0, sizeof(cpu_flags));
-            rlUpdateShaderBuffer(ssbo_flags, cpu_flags, sizeof(cpu_flags), 0);
+            for (int i = 0; i < NUM_CPUS; i++)
+            {
+                cpus[i].periph[0x24] = 0;
+            }
+            rlUpdateShaderBuffer(ssbo_cpus, cpus, sizeof(cpus), 0);
         }
 
         DrawTexturePro(disp_texts[(tex_idx + 1) % 2],

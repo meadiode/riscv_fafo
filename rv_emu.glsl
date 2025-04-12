@@ -9,8 +9,8 @@
 #define DISP_HEIGHT    200
 #define DISP_VRAM_SIZE (DISP_WIDTH * DISP_HEIGHT)
 
-#define ROM_SIZE (1024 * 200 / 4)
-#define RAM_SIZE (1024 * 32 / 4)
+#define ROM_SIZE (1024 * 1024 * 16 / 4)
+#define RAM_SIZE (1024 * 1024 * 8 / 4)
 #define PERIPH_SIZE 10
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
@@ -22,11 +22,10 @@ struct cpu_t
     uint regs[32];
     uint pc;
     uint exit_addr;
-    uint ram[RAM_SIZE];
     uint periph[10];
 };
 
-layout (std430, binding = 1) buffer rv_ram_layout {
+layout (std430, binding = 1) buffer rv_cpus_layout {
     cpu_t cpus[];
 };
 
@@ -34,32 +33,38 @@ layout (std430, binding = 2) readonly buffer rv_rom_layout {
     uint rom[];
 };
 
-layout (std430, binding = 3) buffer rv_cpu_flags_layout {
-    uint cpu_flags[];
+layout (std430, binding = 3) buffer rv_ram_layout {
+    uint ram[];
 };
 
 uniform uint n_cycles;
+uniform uint time_ms;
+
+float rand(vec2 co)
+{ 
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
 
 bool device_write_byte(in uint dev_id, in uint addr, in uint data)
 {
     if (addr >= RAM_START)
     {
         uint offset = addr - RAM_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
         
         if (word_id >= RAM_SIZE)
         {
             return false;
         }
 
-        uint word = cpus[dev_id].ram[word_id] & ~(0xff << ((offset % 4) * 8));
-        cpus[dev_id].ram[word_id] = word | ((data & 0xff) << ((offset % 4) * 8));
+        uint word = ram[dev_id * RAM_SIZE + word_id] & ~(0xff << ((offset & 0x03) << 3));
+        ram[dev_id * RAM_SIZE + word_id] = word | ((data & 0xff) << ((offset & 0x03) << 3));
         return true;
     }
     else if (addr >= VRAM_START)
     {
         uint offset = addr - VRAM_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
 
         if (word_id >= DISP_VRAM_SIZE)
         {
@@ -70,22 +75,22 @@ bool device_write_byte(in uint dev_id, in uint addr, in uint data)
                              gl_GlobalInvocationID.y * DISP_HEIGHT);
         ivec2 coord = origin + ivec2(word_id % DISP_WIDTH, word_id / DISP_WIDTH);
         vec4 pixel = imageLoad(displays, coord);
-        pixel[offset % 4] = float(data) / 255.0;
+        pixel[offset & 0x03] = float(data) / 255.0;
         imageStore(displays, coord, pixel);
         return true;
     }
     else if (addr >= PERIPH_START)
     {
         uint offset = addr - PERIPH_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
         
         if (word_id >= PERIPH_SIZE)
         {
             return false;
         }
 
-        uint word = cpus[dev_id].periph[word_id] & ~(0xff << ((offset % 4) * 8));
-        cpus[dev_id].periph[word_id] = word | ((data & 0xff) << ((offset % 4) * 8));
+        uint word = cpus[dev_id].periph[word_id] & ~(0xff << ((offset & 0x03) << 3));
+        cpus[dev_id].periph[word_id] = word | ((data & 0xff) << ((offset & 0x03) << 3));
         return true;
     }
 
@@ -107,22 +112,22 @@ bool device_write_word(in uint dev_id, in uint addr, in uint data)
 {
     bool res = true;
 
-    if (0 == (addr % 4))
+    if (0 == (addr & 0x03))
     {
         if (addr >= RAM_START)
         {
-            uint word_id = (addr - RAM_START) / 4;
+            uint word_id = (addr - RAM_START) >> 2;
 
             if (word_id >= RAM_SIZE)
             {
                 return false;
             }
 
-            cpus[dev_id].ram[word_id] = data;
+            ram[dev_id * RAM_SIZE + word_id] = data;
         }
         else if (addr >= VRAM_START)
         {
-            uint word_id = (addr - VRAM_START) / 4;
+            uint word_id = (addr - VRAM_START) >> 2;
 
             if (word_id >= DISP_VRAM_SIZE)
             {
@@ -140,7 +145,7 @@ bool device_write_word(in uint dev_id, in uint addr, in uint data)
         }
         else if (addr >= PERIPH_START)
         {
-            uint word_id = (addr - PERIPH_START) / 4;
+            uint word_id = (addr - PERIPH_START) >> 2;
 
             if (word_id >= PERIPH_SIZE)
             {
@@ -167,40 +172,40 @@ bool device_read_byte(in uint dev_id, in uint addr, out uint data)
     if (addr >= RAM_START)
     {
         uint offset = addr - RAM_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
         
         if (word_id >= RAM_SIZE)
         {
             return false;
         }
 
-        data = (cpus[dev_id].ram[word_id] >> ((offset % 4) * 8)) & 0xff;
+        data = (ram[dev_id * RAM_SIZE + word_id] >> ((offset & 0x03) << 3)) & 0xff;
         return true;
     }
     else if (addr >= ROM_START)
     {
         uint offset = addr - ROM_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
         
         if (word_id >= ROM_SIZE)
         {
             return false;
         }
 
-        data = (rom[word_id] >> ((offset % 4) * 8)) & 0xff;
+        data = (rom[word_id] >> ((offset & 0x03) << 3)) & 0xff;
         return true;
     }
     else if (addr >= PERIPH_START)
     {
         uint offset = addr - PERIPH_START;
-        uint word_id = offset / 4;
+        uint word_id = offset >> 2;
         
         if (word_id >= PERIPH_SIZE)
         {
             return false;
         }
 
-        data = (cpus[dev_id].periph[word_id] >> ((offset % 4) * 8)) & 0xff;
+        data = (cpus[dev_id].periph[word_id] >> ((offset & 0x03) << 3)) & 0xff;
         return true;
     }
 
@@ -226,24 +231,24 @@ bool device_read_word(in uint dev_id, in uint addr, out uint data)
 {
     bool res = true;
 
-    if (0 == (addr % 4))
+    if (0 == (addr & 0x03))
     {
         if (addr >= RAM_START)
         {
             uint offset = addr - RAM_START;
-            uint word_id = offset / 4;
+            uint word_id = offset >> 2;
             
             if (word_id >= RAM_SIZE)
             {
                 return false;
             }
 
-            data = cpus[dev_id].ram[word_id];
+            data = ram[dev_id * RAM_SIZE + word_id];
         }
         else if (addr >= ROM_START)
         {
             uint offset = addr - ROM_START;
-            uint word_id = offset / 4;
+            uint word_id = offset >> 2;
             
             if (word_id >= ROM_SIZE)
             {
@@ -255,7 +260,7 @@ bool device_read_word(in uint dev_id, in uint addr, out uint data)
         else if (addr >= PERIPH_START)
         {
             uint offset = addr - PERIPH_START;
-            uint word_id = offset / 4;
+            uint word_id = offset >> 2;
             
             if (word_id >= PERIPH_SIZE)
             {
@@ -694,15 +699,20 @@ void main()
 {
     uint dev_id = gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x + gl_GlobalInvocationID.x;
 
-    for (uint i = 0; (i < n_cycles) && (cpu_flags[dev_id] == 0); i++)
+    for (uint i = 0; (i < n_cycles) && (cpus[dev_id].periph[9] == 0); i++)
     {
         run_cycle(dev_id);
 
         if (0 != cpus[dev_id].periph[9])
         {
-            cpus[dev_id].periph[9] = 0;
-            cpu_flags[dev_id] = 1;
             break;
+        }
+
+        /* Update RTC if requested */
+        if (0 != cpus[dev_id].periph[3])
+        {
+            cpus[dev_id].periph[3] = 0;
+            cpus[dev_id].periph[1] = time_ms;
         }
     }
 }
