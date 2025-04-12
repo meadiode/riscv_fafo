@@ -3,5 +3,7 @@ build/*
 *.sublime-project
 *.sublime-workspace
 device
+gpu_rv_device
 rv_emu
 torus
+

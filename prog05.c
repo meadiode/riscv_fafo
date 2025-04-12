@@ -221,6 +221,6 @@ int main(void)
         }
         DISP_FLUSH();
 
-        t += 0.01;
+        t += 0.05;
     }
 }

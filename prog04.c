@@ -56,7 +56,7 @@ void draw_line(int px1, int py1, int px2, int py2, int col)
 
 int main(void)
 {
-    const int N_POINTS = 120;
+    const int N_POINTS = 80;
     const float T_STEP = M_PI * 2.0 / (float)N_POINTS;
 
     float alpha = 2.0;

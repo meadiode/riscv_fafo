@@ -38,7 +38,7 @@ RV_CFLAGS += -O3 -Wl,--gc-sections
 
 RV_DIS_FLAGS = -S -M no-aliases
 
-all: device torus \
+all: device torus gpu_rv_device \
 	$(BUILD_DIR)/prog01.elf \
 	$(BUILD_DIR)/prog02.elf \
 	$(BUILD_DIR)/prog03.elf \
@@ -49,6 +49,11 @@ device: device.c rv_emu.c $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/device.o device.c
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/rv_emu.o rv_emu.c
 	$(GCC) -o $@ $(BUILD_DIR)/device.o $(BUILD_DIR)/rv_emu.o $(CFLAGS) $(LDFLAGS) -lraylib -lm
+
+gpu_rv_device: gpu_rv_device.c rv_emu.c $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/gpu_rv_device.o gpu_rv_device.c
+	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/rv_emu.o rv_emu.c
+	$(GCC) -o $@ $(BUILD_DIR)/gpu_rv_device.o $(BUILD_DIR)/rv_emu.o $(CFLAGS) $(LDFLAGS) -lraylib -lm
 
 torus: torus.c $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_PATHS) -c -o $(BUILD_DIR)/torus.o $<

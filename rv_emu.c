@@ -362,7 +362,7 @@ bool device_run_cycle(device_t *dev)
 
         case 0x03: /* sltiu */
             device_set_reg(dev, rd, dev->regs[rs1] < \
-                                    ((uint32_t)imm & 0x111111111111) ? 1 : 0);
+                                    ((uint32_t)imm & 0b111111111111) ? 1 : 0);
             break;
 
         default:
@@ -590,7 +590,7 @@ bool device_run_cycle(device_t *dev)
     }
     break;
 
-    case 0b1110011:
+    case 0b1110011: /* Env call & breakpoint */
     {
         uint32_t funct12 = (inst >> 20) & 0b111111111111;
         uint32_t rs1 = (inst >> 15) & 0b11111;
