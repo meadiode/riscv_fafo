@@ -12,7 +12,7 @@
 #include "system.h"
 
 
-#define NUM_CPUS  225u
+#define NUM_CPUS  64u
 #define ROM_SIZE  (1024u * 1024u * 16u)
 #define RAM_SIZE  (1024u * 1024u * 8u)
 
@@ -27,7 +27,7 @@ typedef struct
 } cpu_t;
 
 
-#define NUM_DISPS_IN_ROW    15
+#define NUM_DISPS_IN_ROW    8
 #define NUM_DISPS_IN_COLUMN (NUM_CPUS / NUM_DISPS_IN_ROW)
 #define DISP_TEX_WIDTH      (NUM_DISPS_IN_ROW * DISP_WIDTH)
 #define DISP_TEX_HEIGHT     (NUM_DISPS_IN_COLUMN * DISP_HEIGHT)

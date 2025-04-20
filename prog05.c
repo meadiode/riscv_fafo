@@ -3,13 +3,12 @@
 #include <string.h>
 #include <math.h>
 #include "system.h"
-#include "printf.h"
 
 #define ABS(x) ((x) > 0 ? (x) : -(x))
 #define DEG2RAD (M_PI / 180.0)
 
-#define TORUS_OSEGS 12
-#define TORUS_ISEGS 12
+#define TORUS_OSEGS 22
+#define TORUS_ISEGS 22
 #define TORUS_OR    0.35
 #define TORUS_IR    0.2
 

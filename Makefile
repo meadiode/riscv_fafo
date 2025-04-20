@@ -32,7 +32,7 @@ RV_OBJCOPY = $(RV_CROSSCOMP)objcopy
 RV_OBJDUMP = $(RV_CROSSCOMP)objdump
 
 
-RV_CFLAGS = -march=rv32i -mabi=ilp32
+RV_CFLAGS = -march=rv32im -mabi=ilp32
 RV_CFLAGS += -O3 -Wl,--gc-sections
 # RV_CFLAGS += -g -O0 -Wl,--gc-sections
 
@@ -102,7 +102,7 @@ $(BUILD_DIR)/prog04.elf: prog04.c $(RV_COMMON_OBJS)
 
 $(BUILD_DIR)/prog05.elf: prog05.c $(RV_COMMON_OBJS)
 	$(RV_GCC) -c $(RV_CFLAGS) prog05.c -o $(BUILD_DIR)/prog05.o	
-	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o $(BUILD_DIR)/printf.o \
+	$(RV_GCC) -T linker.ld $(RV_CFLAGS) $(BUILD_DIR)/system.o \
 			  $(BUILD_DIR)/prog05.o -lm -o $(BUILD_DIR)/prog05.elf
 	$(RV_OBJCOPY) -O binary $(BUILD_DIR)/prog05.elf $(BUILD_DIR)/prog05.bin
 	$(RV_OBJDUMP) $(RV_DIS_FLAGS) $(BUILD_DIR)/prog05.elf > $(BUILD_DIR)/prog05.S

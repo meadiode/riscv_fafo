@@ -713,6 +713,7 @@ void main()
         {
             cpus[dev_id].periph[3] = 0;
             cpus[dev_id].periph[1] = time_ms;
+            // cpus[dev_id].periph[1] += uint(floor(abs(rand(vec2(float(dev_id), 42.0)) * 1000.0)));
         }
     }
 }

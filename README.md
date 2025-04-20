@@ -17,3 +17,17 @@ Configure & make:
 make
 ```
 
+## RISC-V LLVM toolchain
+
+Clone https://github.com/llvm/llvm-project.git
+
+Configure & make:
+
+```
+mkdir build
+cd build
+cmake -G Ninja ../llvm -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TARGETS_TO_BUILD="RISCV" -DLLVM_DEFAULT_TARGET_TRIPLE=riscv32-unknown-elf -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/michael/bin/riscv-llvm
+
+ninja
+ninja install
+```

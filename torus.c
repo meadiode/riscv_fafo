@@ -6,8 +6,8 @@
 
 Image canvas = {0};
 
-#define TORUS_OSEGS 7
-#define TORUS_ISEGS 5
+#define TORUS_OSEGS 22
+#define TORUS_ISEGS 22
 #define TORUS_OR    0.35
 #define TORUS_IR    0.2
 

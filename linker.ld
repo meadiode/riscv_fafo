@@ -1,7 +1,7 @@
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 200K
-    RAM (xrw)   : ORIGIN = 0x20000000, LENGTH = 32K
+    FLASH (rx)  : ORIGIN = 0x8000000, LENGTH = 1M
+    RAM (xrw)   : ORIGIN = 0x20000000, LENGTH = 512K
 }
 
 
