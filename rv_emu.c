@@ -6,6 +6,8 @@ static bool mem_write(mem_t *mem, uint32_t addr,
 static bool mem_read(mem_t *mem, uint32_t addr,
                      uint8_t *data, uint32_t size);
 
+static void *ilp_thread_proc(void *arg);
+
 
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
@@ -37,6 +39,13 @@ void device_uninit(device_t *dev)
     free(dev->rom.data);
     free(dev->ram.data);
     free(dev->periph.data);
+
+    if (dev->ilp_map || dev->ilp_table)
+    {
+        free(dev->ilp_map);
+        free(dev->ilp_table);
+    }
+
     memset(dev, 0, sizeof(device_t));
 }
 
@@ -52,8 +61,15 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
     }
 
     elf_hdr_t elf_hdr = {0};
+    size_t rs;
 
-    fread(&elf_hdr, 1, sizeof(elf_hdr), elf);
+    rs = fread(&elf_hdr, 1, sizeof(elf_hdr), elf);
+    
+    if (rs != sizeof(elf_hdr))
+    {
+        fclose(elf);
+        return false;
+    }
 
     if (elf_hdr.machine != 0x00f3 || elf_hdr.e_ident.bitness != 1)
     {
@@ -65,7 +81,7 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
     fseek(elf, elf_hdr.shoff, SEEK_SET);
 
     sec_hdr_t *sec_table = malloc(sizeof(sec_hdr_t) * elf_hdr.shnum);
-    fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
+    rs = fread(sec_table, sizeof(sec_hdr_t), elf_hdr.shnum, elf);
     
     for (int i = 0; i < elf_hdr.shnum; i++)
     {
@@ -78,7 +94,7 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
             for (int j = 0; j < sec_table[i].size; j++)
             {
                 uint8_t b;
-                fread(&b, 1, 1, elf);
+                rs = fread(&b, 1, 1, elf);
                 if (!device_write(dev, sec_table[i].addr + j, &b, 1))
                 {
                     printf("Error writing to the device address: 0x%08X\n",
@@ -98,7 +114,7 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
         fseek(elf,
               sec_table[elf_hdr.shstrndx].offset + sec_table[i].name, SEEK_SET);
         char sname[16] = {0};
-        fread(sname, 1, sizeof(".strtab"), elf);
+        rs = fread(sname, 1, sizeof(".strtab"), elf);
 
         if (sec_table[i].type == 0x03 && !strcmp(".strtab", sname))
         {
@@ -113,7 +129,7 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
     /* Find the _exit symbol address */
     fseek(elf, sec_table[symtab_id].offset, SEEK_SET);
     sym_t *symbols = malloc(sec_table[symtab_id].size);
-    fread(symbols, 1, sec_table[symtab_id].size, elf);
+    rs = fread(symbols, 1, sec_table[symtab_id].size, elf);
 
     for (int i = 0; i < sec_table[symtab_id].size / sizeof(sym_t); i++)
     {
@@ -125,7 +141,7 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
             fseek(elf, sec_table[strtab_id].offset + symbols[i].name, SEEK_SET);
             do
             {
-                fread(&c, 1, 1, elf);
+                rs = fread(&c, 1, 1, elf);
                 sname[ssize++] = c;
             }
             while(c);
@@ -143,6 +159,110 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
     free(sec_table);
     free(symbols);
 
+    return true;
+}
+
+
+bool device_load_ilp_table(device_t *dev, const char *ilp_file_name)
+{
+    FILE *ilp = fopen(ilp_file_name, "rb");
+
+    if (!ilp)
+    {
+        printf("Error: unable to open '%s'\n", ilp_file_name);
+        return false;
+    }
+
+    char magic[4] = {0};
+    size_t rs;
+    rs = fread(magic, 1, sizeof(magic), ilp);
+
+    if (rs == sizeof(magic) && memcmp(magic, "ILP", sizeof(magic)))
+    {
+        printf("Error: Invalid ILP file\n");
+        fclose(ilp);
+        return false;
+    }
+
+    uint32_t num_blocks = 0;
+    uint32_t num_threads = 0;
+    uint32_t table_size = 0;
+
+    rs = fread(&num_blocks, 1, sizeof(num_blocks), ilp);
+    printf("Number of ILP blocks: %d\n", num_blocks);
+
+    rs = fread(&num_threads, 1, sizeof(num_threads), ilp);
+    printf("Number of threads: %d\n", num_threads);
+    
+    dev->ilp_n_blocks = num_blocks;
+    dev->ilp_n_threads = num_threads;
+    dev->ilp_map = malloc(sizeof(ilp_entry_t) * num_blocks);
+
+    for (int i = 0; i < num_blocks; i++)
+    {
+        rs = fread(&dev->ilp_map[i], 1, sizeof(ilp_entry_t), ilp);
+        table_size += dev->ilp_map[i].size;
+        
+        // printf("block %05u, start: 0x%08X, offset: %u, size: %u\n",
+        //        i, dev->ilp_map[i].addr, dev->ilp_map[i].offset, dev->ilp_map[i].size);
+    }
+
+    printf("ILP table size: %u\n", table_size);
+
+    dev->ilp_table = malloc(table_size);
+    int read_table_size = fread(dev->ilp_table, 1, table_size, ilp);
+
+    if (read_table_size != table_size)
+    {
+        printf("Error: Malformed ILP file\n");
+        fclose(ilp);
+        return false;
+    }
+
+    // int block_id = 6;
+
+    // uint32_t block_size = dev->ilp_map[block_id].size;
+    // uint32_t block_iid = dev->ilp_map[block_id].offset / 4;
+    // printf("ILP block %u:\n", block_id);
+
+    // while (block_size)
+    // {
+    //     uint32_t inst = dev->ilp_table[block_iid];
+    //     printf("0x%08X ", inst);
+    //     block_iid++;
+    //     if (inst == 0x0)
+    //     {
+    //         printf("\n");
+    //     }
+    //     block_size -= 4;
+    // }
+
+
+    int res = 0;
+
+    res = pthread_barrier_init(&dev->ilp_barrier1, NULL, num_threads + 1);
+    res = pthread_barrier_init(&dev->ilp_barrier2, NULL, num_threads + 1);
+
+    if (res)
+    {
+        printf("Error: initializing barrier: %d\n", res);
+        return false;
+    }
+
+    dev->ilp_threads = malloc(sizeof(pthread_t) * num_threads);
+    dev->ilp_threads_data = malloc(sizeof(ilp_thread_data_t) * num_threads);
+    dev->ilp_slice = malloc(sizeof(uint32_t) * num_threads);
+
+    for (int i = 0; i < dev->ilp_n_threads; i++)
+    {
+        dev->ilp_threads_data[i].dev = (struct device_t*)dev;
+        dev->ilp_threads_data[i].thread_id = i;
+
+        res = pthread_create(&dev->ilp_threads[i], NULL,
+                             ilp_thread_proc, &dev->ilp_threads_data[i]);
+    }
+
+    fclose(ilp);
     return true;
 }
 
@@ -178,7 +298,6 @@ static bool mem_read(mem_t *mem, uint32_t addr, uint8_t *data, uint32_t size)
 }
 
 
-
 bool device_write(device_t *dev, uint32_t addr,
                   const uint8_t *data, uint32_t size)
 {
@@ -202,17 +321,8 @@ void device_set_reg(device_t *dev, int rd, uint32_t val)
 }
 
 
-bool device_run_cycle(device_t *dev)
+bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 {
-    uint32_t inst;
-
-    if (!device_read(dev, dev->pc, (uint8_t*)&inst, sizeof(inst)))
-    {
-        return false;
-    }
-
-    // printf("Executing 0x%08X at 0x%08X\n", inst, dev->pc);
-
     uint32_t opcode = inst & 0b1111111;
     bool res = true;
     bool pc_updated = false;
@@ -634,7 +744,7 @@ bool device_run_cycle(device_t *dev)
         imm |= (inst >> 31) << 20;
         imm = (imm << 11) >> 11;
 
-        device_set_reg(dev, rd, dev->pc + 4);
+        device_set_reg(dev, rd, pc_ro + 4);
         dev->pc += imm;
         pc_updated = true;
     }
@@ -651,7 +761,7 @@ bool device_run_cycle(device_t *dev)
         switch (funct3)
         {
         case 0x00:
-            device_set_reg(dev, rd, dev->pc + 4);
+            device_set_reg(dev, rd, pc_ro + 4);
             dev->pc = dev->regs[rs1] + imm;
             pc_updated = true;
         break;
@@ -680,7 +790,7 @@ bool device_run_cycle(device_t *dev)
         int32_t imm = (inst >> 12) & 0xfffff;
         imm = (imm << 11) >> 11;
         
-        device_set_reg(dev, rd, dev->pc + (imm << 12));
+        device_set_reg(dev, rd, pc_ro + (imm << 12));
     }
     break;
 
@@ -726,8 +836,105 @@ bool device_run_cycle(device_t *dev)
     {
         dev->pc += 4;
     }
+
     dev->regs[0] = 0;
-    dev->elapsed_cycles++;
+
+    return res;    
+}
+
+
+static void *ilp_thread_proc(void *arg)
+{
+    device_t *dev = (struct device_t*)((ilp_thread_data_t*)arg)->dev;
+    uint32_t id = ((ilp_thread_data_t*)arg)->thread_id;
+    uint32_t addr;
+    uint32_t inst;
+
+    // for (;;)
+    // {
+    //     pthread_barrier_wait(&dev->ilp_barrier1);
+
+    //     pthread_barrier_wait(&dev->ilp_barrier2);
+    // }
+
+    return NULL;
+}
+
+
+#define SINGLE_THREADED 1
+
+bool device_run_cycle(device_t *dev)
+{
+    uint32_t addr, inst;
+    bool res = true;
+
+    if (dev->ilp_cur_items == 0 && dev->ilp_map != NULL)
+    {
+        uint32_t b_id = (dev->pc - dev->rom.origin) >> 2;
+        
+        if (b_id < dev->ilp_n_blocks)
+        {
+            dev->ilp_cur_id = dev->ilp_map[b_id].offset >> 2;
+            dev->ilp_cur_items = dev->ilp_map[b_id].size >> 2;
+        }
+
+    }
+
+    bool slice_end = false;
+
+    if (dev->ilp_cur_items)
+    {
+        for (int i = 0; i < dev->ilp_n_threads; i++)
+        {
+            if (!slice_end)
+            {
+                addr = dev->ilp_table[dev->ilp_cur_id];
+                dev->ilp_cur_id++;
+                dev->ilp_cur_items--;
+                slice_end = addr == 0x0;
+            }
+
+            dev->ilp_slice[i] = addr;
+        }
+
+        if (!slice_end && dev->ilp_cur_items)
+        {
+            dev->ilp_cur_id++;
+            dev->ilp_cur_items--;
+        }
+
+#ifdef SINGLE_THREADED
+        
+        for (int i = 0; i < dev->ilp_n_threads; i++)
+        {
+            addr = dev->ilp_slice[i];
+
+            if (addr)
+            {
+                if (!device_read(dev, addr, (uint8_t*)&inst, sizeof(inst)))
+                {
+                    return false;
+                }
+
+                res = res && device_run_instruction(dev, inst, addr);
+            }
+        }
+#else
+
+        // pthread_barrier_wait(&dev->ilp_barrier1);
+        // pthread_barrier_wait(&dev->ilp_barrier2);
+
+#endif
+    }
+    else
+    {
+        if (!device_read(dev, dev->pc, (uint8_t*)&inst, sizeof(inst)))
+        {
+            return false;
+        }
+        
+        res = device_run_instruction(dev, inst, dev->pc);
+    }
 
     return res;
 }

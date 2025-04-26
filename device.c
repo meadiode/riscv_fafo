@@ -30,6 +30,15 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
+    if (argc >= 3)
+    {
+        if (!device_load_ilp_table(&dev, argv[2]))
+        {
+            exit(-1);
+        }
+    }
+
+
     InitWindow(640, 400, "RISC-V device");
 
     Image canvas = {0};
@@ -48,19 +57,23 @@ int main(int argc, char **argv)
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        uint64_t frame_start_cycles = dev.elapsed_cycles;
+        uint64_t frame_cycles = 0;
+        uint64_t total_cycles = 0;
 
         while (!exit_reached)
         {
             if (!device_run_cycle(&dev))
             {
-                printf("Error!\n");
+                printf("Error running a cycle!\n");
                 fflush(stdout);
                 exit_reached = true;
                 break;
             }
             else
             {
+                total_cycles++;
+                frame_cycles++;
+
                 /* The program has something to say */
                 if (dev.periph.data[1] && prog_output_n < (sizeof(prog_output) - 1))
                 {
@@ -81,7 +94,8 @@ int main(int argc, char **argv)
                 {
                     dev.periph.data[0x24] = 0;
                     memcpy(canvas.data, &dev.periph.data[0x28], DISP_VRAM_SIZE);
-                    printf("Frame CPU cycles: %lu\n", dev.elapsed_cycles - frame_start_cycles);
+                    printf("CPU cycles per frame: %lu\n", frame_cycles);
+                    frame_cycles = 0;
                     fflush(stdout);
                     break;
                 }
@@ -97,7 +111,7 @@ int main(int argc, char **argv)
             if (dev.pc == dev.exit_addr || IsKeyPressed(KEY_X))
             {
                 printf("Program done!\n");
-                printf("Elapsed CPU cycles: %lu\n", dev.elapsed_cycles);
+                printf("Elapsed CPU cycles: %lu\n", total_cycles);
                 
                 printf("PROG OUTPUT: %s\n", prog_output);
                 fflush(stdout);

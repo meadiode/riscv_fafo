@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 typedef struct
 {
@@ -18,14 +19,44 @@ typedef struct
 
 typedef struct
 {
+    uint32_t addr;
+    uint32_t offset;
+    uint32_t size;
+
+} ilp_entry_t;
+
+
+typedef struct
+{
+    struct device_t *dev;
+    uint32_t thread_id;
+
+} ilp_thread_data_t;
+
+
+typedef struct
+{
     uint32_t regs[32];
     uint32_t pc;
     uint32_t exit_addr;
-    uint64_t elapsed_cycles;
 
     mem_t rom;
     mem_t ram;
     mem_t periph;
+
+    uint32_t          ilp_n_blocks;
+    uint32_t          ilp_n_threads;
+    uint32_t          ilp_cur_id;
+    uint32_t          ilp_cur_items;
+
+    ilp_entry_t       *ilp_map;
+    uint32_t          *ilp_table;
+
+    pthread_t         *ilp_threads;
+    ilp_thread_data_t *ilp_threads_data;
+    uint32_t          *ilp_slice;
+    pthread_barrier_t ilp_barrier1;
+    pthread_barrier_t ilp_barrier2;
 
 } device_t;
 
@@ -95,10 +126,12 @@ void device_init(device_t *dev,
                  uint32_t ram_size, uint32_t ram_origin,
                  uint32_t periph_size, uint32_t periph_origin);
 bool device_load_from_elf(device_t *dev, const char *elf_file_name);
+bool device_load_ilp_table(device_t *dev, const char *ilp_file_name);
 void device_uninit(device_t *dev);
 bool device_write(device_t *dev, uint32_t addr, const uint8_t *data, uint32_t size);
 bool device_read(device_t *dev, uint32_t addr, uint8_t *data, uint32_t size);
 void device_set_reg(device_t *dev, int rd, uint32_t val);
+bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro);
 bool device_run_cycle(device_t *dev);
 
 

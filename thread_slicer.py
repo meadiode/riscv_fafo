@@ -1,6 +1,7 @@
 
-from struct import unpack
+from struct import unpack, pack
 from dataclasses import dataclass
+import sys
 
 @dataclass
 class ElfHdr:
@@ -56,6 +57,7 @@ class Program:
     rom_start = 0x08000000
     rom_size = 1024 * 1024 * 10
     prog_end = 0x08000000
+    max_slice_len = 8
 
     def __init__(self, elf_file_name):
         self.rom = bytearray(self.rom_size)
@@ -63,15 +65,7 @@ class Program:
 
         self.load_from_elf(elf_file_name)
         self.find_all_basic_blocks()
-
-        # lns = [len(bb) for bb in self.basic_blocks.values()]
-        # lns.sort()
-        # print(lns)
-        # print(sum(lns) / len(lns))
-        
-        # from collections import Counter
-        # ctr = Counter(lns)
-        # print(ctr)
+        self.slice_all_basic_blocks()
 
 
     def load_from_elf(self, elf_file_name):
@@ -124,8 +118,6 @@ class Program:
                 break
             bblock.append((pc, reads, writes))
             locs.add(pc)
-
-            print(f'0x{pc:08X}:', reads, writes, branch)
             
             if ((next_pc - pc) != 4) or branch:
                 heads.add(pc + 4)
@@ -136,8 +128,6 @@ class Program:
 
         heads_ = set([h for h in heads if h < self.prog_end])
 
-        print('')
-        self.basic_blocks[start] = bblock
         return bblock, heads_
 
 
@@ -145,16 +135,110 @@ class Program:
         '''
         Find all basic blocks and store them into the basic_blocks dict.
         '''
-        heads = {self.rom_start,}
+        for pc in range(self.rom_start,  self.prog_end, 4):
+            if not (pc in self.basic_blocks):
+                bb, hd = self.find_basic_block(pc)
+                self.basic_blocks[bb[0][0]] = bb
 
-        while heads:
-            n_heads = set()
+
+    def slice_basic_block(self, bb_id):
+        '''
+        Determine which instructions in the basic block at address bb_id
+        could be executed in parallel, i.e. slice the block.
+        Return: a list of tuples, where each tuple contains addresses of
+        instructions that could be safely executed in parallel together.
+        '''
+        bb = self.basic_blocks[bb_id]
+
+        slices = []
+
+        for inst, rd, wd in bb[:-1]:
+            slice_id = len(slices)
             
-            for pc in heads:
-                if not (pc in self.basic_blocks):
-                    bb, hd = self.find_basic_block(pc)
-                    n_heads.update(hd)
-            heads = n_heads.copy()
+            for sinsts, srd, swd in slices[::-1]:
+                if set(wd).intersection(srd) or \
+                   set(rd).intersection(swd) or \
+                   set(wd).intersection(swd):
+                    break
+                slice_id -= 1
+
+            if (slice_id + 1) > len(slices):
+                slices.append(([], set(), set()))
+
+            free_space = False
+            for i in range(slice_id, len(slices)):
+                if (self.max_slice_len is None) or \
+                        (len(slices[i][0]) < self.max_slice_len):
+                    slice_id = i
+                    free_space = True
+                    break
+            
+            if not free_space:
+                slices.append(([], set(), set()))
+                slice_id = len(slices) - 1
+            
+            slices[slice_id][0].append(inst)
+            slices[slice_id][1].update(rd)
+            slices[slice_id][2].update(wd)
+
+        res = []
+        for sl in slices:
+            res.append(tuple(sl[0]))
+
+        res.append((bb[-1][0],))
+
+        return res
+
+
+    def slice_all_basic_blocks(self):
+        '''
+        Slice all the basic blocks and store the result in the
+        sliced_blocks dict. Also print some stats.
+        '''
+        self.sliced_blocks = {}
+        stat_max_slice_len = 0
+        stat_total_slice_len = 0
+        stat_num_slices = 0
+
+        for bb in self.basic_blocks:
+            sliced = self.slice_basic_block(bb)
+
+            if sliced:
+                for sl in sliced:
+                    if len(sl) > stat_max_slice_len:
+                        stat_max_slice_len = len(sl)
+                    stat_num_slices += 1
+                    stat_total_slice_len += len(sl)
+
+                self.sliced_blocks[bb] = sliced
+
+        self.stat_max_slice_len = stat_max_slice_len
+        avg_len = stat_total_slice_len / stat_num_slices
+        print(f'Max slice length:        {stat_max_slice_len}')
+        print(f'Avg slice length:        {avg_len:.02f}')
+        print(f'Number of sliced blocks: {len(self.sliced_blocks)}')
+
+        num_cycles = 0
+        num_idle_cycles = 0
+        for sb in self.sliced_blocks.values():
+            for sl in sb:
+                num_cycles += stat_max_slice_len
+                num_idle_cycles += stat_max_slice_len - len(sl)
+        idle_prc = (num_idle_cycles / num_cycles) * 100.0
+        print(f'Idle cycles:             {idle_prc:.02f}%')
+
+
+    def get_inst(self, pc):
+        if pc == 0:
+            return 0
+
+        offset = pc - self.rom_start
+
+        if offset >= self.rom_size:
+            raise ValueError(f'Invalid program address: 0x{pc:08X}')
+        inst = unpack('I', self.rom[offset: offset + 4])[0]
+
+        return inst
 
 
     def decode_inst(self, pc):
@@ -166,12 +250,7 @@ class Program:
                 True/False if branching,
                 address of the next instruction
         '''
-        offset = pc - self.rom_start
-
-        if offset >= self.rom_size:
-            raise ValueError(f'Invalid program address: 0x{pc:08X}')
-
-        inst = unpack('I', self.rom[offset: offset + 4])[0]
+        inst = self.get_inst(pc)
 
         opcode = inst & 0b1111111
         pc_updated = False
@@ -228,19 +307,20 @@ class Program:
                 match funct3:
                     
                     case 0x00 | 0x04:
-                        reads = ((rs1, imm),)
+                        reads = (rs1, (rs1, imm))
 
                     case 0x01 | 0x05:
-                        reads = ((rs1, imm), (rs1, imm + 1))
+                        reads = (rs1, (rs1, imm), (rs1, imm + 1))
 
                     case 0x02:
-                        reads = ((rs1, imm), (rs1, imm + 1),
+                        reads = (rs1, (rs1, imm), (rs1, imm + 1),
                                  (rs1, imm + 2), (rs1, imm + 3))
 
                     case _:
                         raise ValueError(f'Invalid load operation: 0x{inst:08X}')
 
                 writes = (rd,)
+
 
             case 0b1100011: # Branching ops
                 imm = (inst >> 8) & 0b1111
@@ -274,8 +354,6 @@ class Program:
                 rd = (inst >> 7) & 0b11111
                 funct3 = (inst >> 12) & 0b111
                 rs1 = (inst >> 15) & 0b11111
-                imm = (inst >> 20) & 0b111111111111
-                imm = twocomp(imm, 11)
 
                 pc_updated = True
                 branch = True
@@ -292,6 +370,7 @@ class Program:
                 writes = (rd,)
 
             case 0b1110011: # Env call & breakpoint
+                # ignored for now
                 pass
 
             case _:
@@ -306,7 +385,62 @@ class Program:
         return reads, writes, branch, pc
 
 
+    def dump_to_txt(self, file_name, idle_cycles=False):
+        file = open(file_name, 'w')
+
+        file.write(f'num blocks: {len(self.sliced_blocks)}\n')
+        file.write(f'num threads: {self.stat_max_slice_len}\n\n')
+
+        ids = list(self.sliced_blocks.keys())
+        ids.sort()
+
+        for pc in ids:
+            sb = self.sliced_blocks[pc]
+            file.write(f'0x{sb[0][0]:08X}:\n')
+
+            for sl in sb:
+                if idle_cycles:
+                    sl = sl + (0,) * (self.stat_max_slice_len - len(sl))
+                file.write('    ')
+                for addr in sl:
+                    file.write(f'0x{addr:08X} ')
+                file.write('\n')
+            file.write('\n')
+
+        file.close()
+
+
+    def dump_to_ilp(self, file_name):
+        file = open(file_name, 'wb')
+
+        file.write(pack('4s', bytes('ILP', 'utf-8')))
+        file.write(pack('I', len(self.sliced_blocks)))
+        file.write(pack('I', self.stat_max_slice_len))
+        ids = list(self.sliced_blocks.keys())
+        ids.sort()
+
+        offset = 0
+        for pc in ids:
+            sb = self.sliced_blocks[pc]
+            size = 0
+            for sl in sb:
+                size += (len(sl) + 1) * 4
+            file.write(pack('III', pc, offset, size))
+            offset += size
+
+        for pc in ids:
+            sb = self.sliced_blocks[pc]
+            for sl in sb:
+                sl = sl + (0,)
+                file.write(pack('I' * len(sl), *sl))
+
+        file.close()
+
 
 if __name__ == '__main__':
-    prog = Program('./build/prog05.elf')
-    # prog = Program('./doomgeneric/doomgeneric/doomrv.elf')
+    if len(sys.argv) != 3:
+        raise RuntimeError('Usage: <input .elf file> <output .ilp file>')
+    else:
+        prog = Program(sys.argv[1])
+        prog.dump_to_ilp(sys.argv[2])
+        prog.dump_to_txt(sys.argv[2] + '.txt')
