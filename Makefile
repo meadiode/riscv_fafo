@@ -32,8 +32,8 @@ RV_OBJCOPY = $(RV_CROSSCOMP)objcopy
 RV_OBJDUMP = $(RV_CROSSCOMP)objdump
 
 
-RV_CFLAGS = -march=rv32im -mabi=ilp32
-RV_CFLAGS += -O3 -Wl,--gc-sections
+RV_CFLAGS = -march=rv32im_zicond -mabi=ilp32
+RV_CFLAGS += -O3 -Wl,--gc-sections -funroll-all-loops
 # RV_CFLAGS += -g -O0 -Wl,--gc-sections
 
 RV_DIS_FLAGS = -S -M no-aliases

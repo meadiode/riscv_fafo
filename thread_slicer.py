@@ -50,6 +50,25 @@ def twocomp(val, n_bits):
     return val
 
 
+class MLoc:
+
+    def __init__(self, reg, offset):
+        self.val = (reg, offset)
+
+
+    def __hash__(self):
+        return 42
+
+
+    def __eq__(self, other):
+        if not isinstance(other, MLoc):
+            return False 
+        if self.val[0] == other.val[0]:
+            return self.val[1] == other.val[1]
+        else:
+            return True
+
+
 PC_REG = 32
 
 class Program:
@@ -284,14 +303,14 @@ class Program:
                 match funct3:
                     
                     case 0x00:
-                        writes = ((rs1, imm),)
+                        writes = (MLoc(rs1, imm),)
                     
                     case 0x01:
-                        writes = ((rs1, imm), (rs1, imm + 1))
+                        writes = (MLoc(rs1, imm), MLoc(rs1, imm + 1))
                     
                     case 0x02:
-                        writes = ((rs1, imm), (rs1, imm + 1),
-                                  (rs1, imm + 2), (rs1, imm + 3))
+                        writes = (MLoc(rs1, imm), MLoc(rs1, imm + 1),
+                                  MLoc(rs1, imm + 2), MLoc(rs1, imm + 3))
                     case _:
                         raise ValueError(f'Invalid store operation: 0x{inst:08X}')
 
@@ -307,14 +326,14 @@ class Program:
                 match funct3:
                     
                     case 0x00 | 0x04:
-                        reads = (rs1, (rs1, imm))
+                        reads = (rs1, MLoc(rs1, imm))
 
                     case 0x01 | 0x05:
-                        reads = (rs1, (rs1, imm), (rs1, imm + 1))
+                        reads = (rs1, MLoc(rs1, imm), MLoc(rs1, imm + 1))
 
                     case 0x02:
-                        reads = (rs1, (rs1, imm), (rs1, imm + 1),
-                                 (rs1, imm + 2), (rs1, imm + 3))
+                        reads = (rs1, MLoc(rs1, imm), MLoc(rs1, imm + 1),
+                                 MLoc(rs1, imm + 2), MLoc(rs1, imm + 3))
 
                     case _:
                         raise ValueError(f'Invalid load operation: 0x{inst:08X}')

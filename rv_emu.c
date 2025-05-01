@@ -409,6 +409,10 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
                 device_set_reg(dev, rd, dev->regs[rs1] % dev->regs[rs2]);
                 break;
 
+            case 0x07: /* czero.nez */
+                device_set_reg(dev, rd, dev->regs[rs2] ? 0 : dev->regs[rs1]);
+                break;
+
             default:
                 break;
             }
@@ -450,6 +454,10 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
             case 0x01: /* divu */
                 device_set_reg(dev, rd, dev->regs[rs1] / dev->regs[rs2]);
+                break;
+
+            case 0x07: /* czero.eqz */
+                device_set_reg(dev, rd, dev->regs[rs2] ? dev->regs[rs1] : 0);
                 break;
 
             default:
