@@ -7,7 +7,8 @@ static bool mem_read(mem_t *mem, uint32_t addr,
                      uint8_t *data, uint32_t size);
 
 static void *ilp_thread_proc(void *arg);
-
+static bool unpack_instruction(uint32_t inst, uinst_t *uinst);
+static bool device_run_unpacked_instruction(device_t *dev, uinst_t inst, uint32_t pc_ro);
 
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
@@ -102,8 +103,21 @@ bool device_load_from_elf(device_t *dev, const char *elf_file_name)
                     break;
                 }
             }
+
+            if (sec_table[i].flags & 0x04)
+            {
+                uint32_t sec_end = sec_table[i].addr + sec_table[i].size;
+
+                if (sec_end > dev->prog_end)
+                {
+                    dev->prog_end = sec_end;
+                }
+            }
+
         }
     }
+
+    printf("Program end: 0x%08X\n", dev->prog_end);
 
     int strtab_id = -1;
     int symtab_id = -1;
@@ -267,6 +281,36 @@ bool device_load_ilp_table(device_t *dev, const char *ilp_file_name)
 }
 
 
+bool device_pre_unpack_instructions(device_t *dev)
+{
+    if (!dev->prog_end || !(dev->prog_end > dev->rom.origin &&
+                            dev->prog_end <= (dev->rom.origin + dev->rom.size)))
+    {
+        return false;
+    }
+
+    uint32_t num_insts = (dev->prog_end - dev->rom.origin) / 4;
+    uint32_t pc = dev->rom.origin;
+    uint32_t inst;
+
+    dev->uinsts = malloc(num_insts * sizeof(uinst_t));
+
+    if (!dev->uinsts)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < num_insts; i++)
+    {
+        device_read(dev, pc, (uint8_t*)&inst, sizeof(inst));
+        unpack_instruction(inst, dev->uinsts + i);
+        pc += 4;
+    }
+
+    return true;
+}
+
+
 static bool mem_write(mem_t *mem, uint32_t addr,
                       const uint8_t *data, uint32_t size)
 {
@@ -323,19 +367,36 @@ void device_set_reg(device_t *dev, int rd, uint32_t val)
 
 bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 {
+    uinst_t uinst;
+
+    if (!unpack_instruction(inst, &uinst))
+    {
+        printf("Error: failed executing instruction: "
+               "0x%08X at address 0x%08X\n", inst, dev->pc);
+        
+        return false;
+    }
+
+    return device_run_unpacked_instruction(dev, uinst, pc_ro);
+}
+
+
+static bool unpack_instruction(uint32_t inst, uinst_t *uinst)
+{
     uint32_t opcode = inst & 0b1111111;
     bool res = true;
-    bool pc_updated = false;
+    uinst->inst_id = INST_INVALID;
 
     switch (opcode)
     {
     case 0b0110011:  /* Integer Register-Register ops */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        uint32_t rs2 = (inst >> 20) & 0b11111;
         uint32_t funct7 = (inst >> 25) & 0b1111111;
+
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->rs2 = (inst >> 20) & 0b11111;
 
         switch (funct3)
         {
@@ -343,18 +404,15 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x00: /* add */
-                device_set_reg(dev, rd, dev->regs[rs1] + dev->regs[rs2]);
+                uinst->inst_id = INST_ADD;
                 break;
 
             case 0x20: /* sub */
-                device_set_reg(dev, rd, dev->regs[rs1] - dev->regs[rs2]);
+                uinst->inst_id = INST_SUB;
                 break;
 
             case 0x01: /* mul */
-                {
-                    int32_t prod = (int32_t)dev->regs[rs1] * (int32_t)dev->regs[rs2];
-                    device_set_reg(dev, rd, (uint32_t)prod);
-                }
+                uinst->inst_id = INST_MUL;
                 break;
 
             default:
@@ -366,12 +424,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x0: /* xor */
-                device_set_reg(dev, rd, dev->regs[rs1] ^ dev->regs[rs2]);
+                uinst->inst_id = INST_XOR;
                 break;
 
             case 0x01: /* div */
-                device_set_reg(dev, rd, (uint32_t)((int32_t)dev->regs[rs1] / \
-                                                   (int32_t)dev->regs[rs2]));
+                uinst->inst_id = INST_DIV;
                 break;
 
             default:
@@ -384,12 +441,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x0: /* or */
-                device_set_reg(dev, rd, dev->regs[rs1] | dev->regs[rs2]);
+                uinst->inst_id = INST_OR;
                 break;
             
             case 0x01: /* rem */
-                device_set_reg(dev, rd, (uint32_t)((int32_t)dev->regs[rs1] % \
-                                                   (int32_t)dev->regs[rs2]));
+                uinst->inst_id = INST_REM;
                 break;
 
             default:
@@ -402,15 +458,15 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x0: /* and */
-                device_set_reg(dev, rd, dev->regs[rs1] & dev->regs[rs2]);
+                uinst->inst_id = INST_AND;
                 break;                
             
             case 0x01: /* remu */
-                device_set_reg(dev, rd, dev->regs[rs1] % dev->regs[rs2]);
+                uinst->inst_id = INST_REMU;
                 break;
 
             case 0x07: /* czero.nez */
-                device_set_reg(dev, rd, dev->regs[rs2] ? 0 : dev->regs[rs1]);
+                uinst->inst_id = INST_CZERO_NEZ;
                 break;
 
             default:
@@ -423,16 +479,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x00: /* sll */
-                device_set_reg(dev, rd, dev->regs[rs1] << dev->regs[rs2]);
+                uinst->inst_id = INST_SLL;
                 break;
 
             case 0x01: /* mulh */
-                {
-                    int64_t op1 = (int64_t)(int32_t)dev->regs[rs1];
-                    int64_t op2 = (int64_t)(int32_t)dev->regs[rs2];
-                    int64_t prod = op1 * op2;
-                    device_set_reg(dev, rd, (uint32_t)(prod >> 32));
-                }
+                uinst->inst_id = INST_MULH;
                 break;
 
             default:
@@ -444,20 +495,19 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x00: /* srl */
-                device_set_reg(dev, rd, dev->regs[rs1] >> dev->regs[rs2]);
+                uinst->inst_id = INST_SRL;
                 break;
 
             case 0x20: /* sra */
-                device_set_reg(dev, rd,
-                               (int32_t)dev->regs[rs1] >> dev->regs[rs2]);
+                uinst->inst_id = INST_SRA;
                 break;
 
             case 0x01: /* divu */
-                device_set_reg(dev, rd, dev->regs[rs1] / dev->regs[rs2]);
+                uinst->inst_id = INST_DIVU;
                 break;
 
             case 0x07: /* czero.eqz */
-                device_set_reg(dev, rd, dev->regs[rs2] ? dev->regs[rs1] : 0);
+                uinst->inst_id = INST_CZERO_EQZ;
                 break;
 
             default:
@@ -469,15 +519,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
             case 0x00: /* slt */
-                device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < \
-                                        (int32_t)dev->regs[rs2] ? 1 : 0);
+                uinst->inst_id = INST_SLT;
                 break;
 
             case 0x01: /* mulhsu */
-                {
-                    int64_t prod = (int64_t)(int32_t)dev->regs[rs1] * (uint64_t)dev->regs[rs2];
-                    device_set_reg(dev, rd, (uint32_t)(prod >> 32));
-                }
+                uinst->inst_id = INST_MULHSU;
                 break;
 
             default:
@@ -489,14 +535,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             switch (funct7)
             {
                 case 0x00: /* sltu */
-                    device_set_reg(dev, rd, dev->regs[rs1] < dev->regs[rs2] ? 1 : 0);
+                    uinst->inst_id = INST_SLTU;
                     break;
 
                 case 0x01: /* mulhu */
-                    {
-                        uint64_t prod = (uint64_t)dev->regs[rs1] * (uint64_t)dev->regs[rs2];
-                        device_set_reg(dev, rd, (uint32_t)(prod >> 32));
-                    }
+                    uinst->inst_id = INST_MULHU;
                     break;
 
                 default:
@@ -515,35 +558,36 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b0010011: /* Integer Register-Immediate ops */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        int32_t imm = (inst >> 20) & 0b111111111111;
-        imm = (imm << 20) >> 20;
+
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->imm = (inst >> 20) & 0b111111111111;
+        uinst->imm = (uinst->imm << 20) >> 20;
 
         switch (funct3)
         {
         case 0x00:  /* addi */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] + imm);
+            uinst->inst_id = INST_ADDI;
             break;
 
         case 0x04: /* xori */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] ^ imm);
+            uinst->inst_id = INST_XORI;
             break;
 
         case 0x06: /* ori */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] | imm);
+            uinst->inst_id = INST_ORI;
             break;
 
         case 0x07: /* andi */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] & imm);
+            uinst->inst_id = INST_ANDI;
             break;
 
         case 0x01:
-            switch (imm >> 5)
+            switch (uinst->imm >> 5)
             {
             case 0x00: /* slli */
-                device_set_reg(dev, rd, dev->regs[rs1] << (imm & 0b11111));
+                uinst->inst_id = INST_SLLI;
                 break;
 
             default:    
@@ -552,15 +596,14 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             break;
 
         case 0x05:
-            switch (imm >> 5)
+            switch (uinst->imm >> 5)
             {
             case 0x00: /* srli */
-                device_set_reg(dev, rd, dev->regs[rs1] >> (imm & 0b11111));
+                uinst->inst_id = INST_SRLI;
                 break;
 
             case 0x20: /* srai */
-                device_set_reg(dev, rd,
-                               ((int32_t)(dev->regs[rs1]) >> (imm & 0b11111)));
+                uinst->inst_id = INST_SRAI;
                 break;
 
             default:
@@ -569,12 +612,11 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
             break;
 
         case 0x02: /* slti */
-            device_set_reg(dev, rd, (int32_t)dev->regs[rs1] < imm ? 1 : 0);
+            uinst->inst_id = INST_SLTI;
             break;
 
         case 0x03: /* sltiu */
-            device_set_reg(dev, rd, dev->regs[rs1] < \
-                                    ((uint32_t)imm & 0b111111111111) ? 1 : 0);
+            uinst->inst_id = INST_SLTIU;
             break;
 
         default:
@@ -587,31 +629,26 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b0100011: /* Store ops */
     {
-        int32_t imm = (inst >> 7) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        uint32_t rs2 = (inst >> 20) & 0b11111;
-        imm |= ((inst >> 25) & 0b1111111) << 5;
-        imm = (imm << 20) >> 20;
-        
-        uint32_t addr = (int32_t)dev->regs[rs1] + imm;
 
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->rs2 = (inst >> 20) & 0b11111;
+        uinst->imm = (inst >> 7) & 0b11111;
+        uinst->imm |= ((inst >> 25) & 0b1111111) << 5;
+        uinst->imm = (uinst->imm << 20) >> 20;
+        
         switch (funct3)
         {
         case 0x00: /* sb */
-            uint8_t bt = dev->regs[rs2] & 0xff;
-            res = device_write(dev, addr, &bt, 1);
+            uinst->inst_id = INST_SB;
             break;
 
         case 0x01: /* sh */
-            uint16_t hw = dev->regs[rs2] & 0xffff;
-            res = device_write(dev, addr, (uint8_t*)&hw, 2);
+            uinst->inst_id = INST_SH;
             break;
 
         case 0x02: /* sw */
-            res = device_write(dev, addr, (uint8_t*)&dev->regs[rs2], 4);
-            // printf("sw: addr: 0x%08X data: 0x%08X\n", addr, dev->regs[rs2]);
-
+            uinst->inst_id = INST_SW;
             break;
 
         default:
@@ -624,44 +661,33 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b0000011: /* Load ops */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        int32_t imm = (inst >> 20) & 0b111111111111;
-        imm = (imm << 20) >> 20;
-        uint32_t addr = dev->regs[rs1] + imm;
+
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->imm = (inst >> 20) & 0b111111111111;
+        uinst->imm = (uinst->imm << 20) >> 20;
 
         switch (funct3)
         {
         case 0x00: /* lb */
-            int8_t sb;
-            res = device_read(dev, addr, (uint8_t*)&sb, 1);
-            device_set_reg(dev, rd, (int32_t)sb);
+            uinst->inst_id = INST_LB;
             break;
 
         case 0x01: /* lh */
-            int16_t shw;
-            res = device_read(dev, addr, (uint8_t*)&shw, 2);
-            device_set_reg(dev, rd, (int32_t)shw);
+            uinst->inst_id = INST_LH;
             break;
 
         case 0x02: /* lw */
-            uint32_t w;
-            res = device_read(dev, addr, (uint8_t*)&w, 4);
-            device_set_reg(dev, rd, w);
-            // printf("lw: addr: 0x%08X data: 0x%08X\n", addr, w);
+            uinst->inst_id = INST_LW;
             break;
 
         case 0x04: /* lbu */
-            uint8_t ub;
-            res = device_read(dev, addr, &ub, 1);
-            device_set_reg(dev, rd, ub);
+            uinst->inst_id = INST_LBU;
             break;
 
         case 0x05: /* lhu */
-            uint16_t hw;
-            res = device_read(dev, addr, (uint8_t*)&hw, 2);
-            device_set_reg(dev, rd, hw);
+            uinst->inst_id = INST_LHU;
             break;
 
         default:
@@ -674,63 +700,41 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b1100011: /* Branching ops */
     {
-        int32_t imm = (inst >> 8) & 0b1111;
-        imm |= ((inst >> 7) & 1) << 10;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        uint32_t rs2 = (inst >> 20) & 0b11111;
-        imm |= ((inst >> 25) & 0b111111) << 4;
-        imm = (imm << 1) | (((inst >> 31) & 1) << 12);
-        imm = (imm << 19) >> 19;
+        
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->rs2 = (inst >> 20) & 0b11111;
+
+        uinst->imm = (inst >> 8) & 0b1111;
+        uinst->imm |= ((inst >> 7) & 1) << 10;
+        uinst->imm |= ((inst >> 25) & 0b111111) << 4;
+        uinst->imm = (uinst->imm << 1) | (((inst >> 31) & 1) << 12);
+        uinst->imm = (uinst->imm << 19) >> 19;
 
         switch (funct3)
         {
         case 0x00: /* beq == */
-            if ((int32_t)(dev->regs[rs1]) == (int32_t)(dev->regs[rs2]))
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BEQ;
             break;
 
         case 0x01: /* bne != */
-            if ((int32_t)(dev->regs[rs1]) != (int32_t)(dev->regs[rs2]))
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BNE;
             break;
 
         case 0x04: /* blt < */
-            if ((int32_t)(dev->regs[rs1]) < (int32_t)(dev->regs[rs2]))
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BLT;
             break;
 
         case 0x05: /* bge >= */
-            if ((int32_t)(dev->regs[rs1]) >= (int32_t)(dev->regs[rs2]))
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BGE;
             break;
 
         case 0x06: /* bltu < (u) */
-            if (dev->regs[rs1] < dev->regs[rs2])
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BLTU;
             break;
 
         case 0x07: /* bgeu >= (u) */
-            if (dev->regs[rs1] >= dev->regs[rs2])
-            {
-                dev->pc += imm;
-                pc_updated = true;
-            }
+            uinst->inst_id = INST_BGEU;
             break;
 
         default:
@@ -744,35 +748,32 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b1101111: /* jal */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
+        uinst->rd = (inst >> 7) & 0b11111;
 
-        int32_t imm = ((inst >> 21) & 0b1111111111) << 1;
-        imm |= ((inst >> 20) & 1) << 11;
-        imm |= ((inst >> 12) & 0b11111111) << 12;
-        imm |= (inst >> 31) << 20;
-        imm = (imm << 11) >> 11;
+        uinst->imm = ((inst >> 21) & 0b1111111111) << 1;
+        uinst->imm |= ((inst >> 20) & 1) << 11;
+        uinst->imm |= ((inst >> 12) & 0b11111111) << 12;
+        uinst->imm |= (inst >> 31) << 20;
+        uinst->imm = (uinst->imm << 11) >> 11;
 
-        device_set_reg(dev, rd, pc_ro + 4);
-        dev->pc += imm;
-        pc_updated = true;
+        uinst->inst_id = INST_JAL;
     }
     break;
 
     case 0b1100111: /* jalr */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
-        int32_t imm = (inst >> 20) & 0b111111111111;
-        imm = (imm << 20) >> 20;
+
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->imm = (inst >> 20) & 0b111111111111;
+        uinst->imm = (uinst->imm << 20) >> 20;
 
         switch (funct3)
         {
         case 0x00:
-            device_set_reg(dev, rd, pc_ro + 4);
-            dev->pc = dev->regs[rs1] + imm;
-            pc_updated = true;
-        break;
+            uinst->inst_id = INST_JALR;
+            break;
 
         default:
             printf("Error: invalid I-type instruction 0x%08X\n", inst);
@@ -784,40 +785,42 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     case 0b0110111: /* lui */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
-        int32_t imm = (inst >> 12) & 0xfffff;
-        imm = (imm << 11) >> 11;
-        
-        device_set_reg(dev, rd, imm << 12);
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->imm = (inst >> 12) & 0xfffff;
+        uinst->imm = (uinst->imm << 11) >> 11;
+
+        uinst->inst_id = INST_LUI;
     }
     break;
 
     case 0b0010111: /* auipc */
     {
-        uint32_t rd = (inst >> 7) & 0b11111;
-        int32_t imm = (inst >> 12) & 0xfffff;
-        imm = (imm << 11) >> 11;
+        uinst->rd = (inst >> 7) & 0b11111;
+        uinst->imm = (inst >> 12) & 0xfffff;
+        uinst->imm = (uinst->imm << 11) >> 11;
         
-        device_set_reg(dev, rd, pc_ro + (imm << 12));
+        uinst->inst_id = INST_AUIPC;
     }
     break;
 
     case 0b1110011: /* Env call & breakpoint */
     {
         uint32_t funct12 = (inst >> 20) & 0b111111111111;
-        uint32_t rs1 = (inst >> 15) & 0b11111;
         uint32_t funct3 = (inst >> 12) & 0b111;
-        uint32_t rd = (inst >> 7) & 0b11111;
-        res = (rs1 == funct3) == (rd == 0x0);
+       
+        uinst->rs1 = (inst >> 15) & 0b11111;
+        uinst->rd = (inst >> 7) & 0b11111;
+
+        res = (uinst->rs1 == funct3) == (uinst->rd == 0x0);
 
         switch (funct12)
         {
         case 0x00:
-            // printf("<<< ECALL >>>\n");
+            uinst->inst_id = INST_ECALL;
             break;
 
         case 0x01:
-            // printf("<<< BREAK >>>\n");
+            uinst->inst_id = INST_BREAK;
             break;
 
         default:
@@ -834,10 +837,302 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
         break;
     }
 
-    if (!res)
+    return res; 
+}
+
+
+static bool device_run_unpacked_instruction(device_t *dev, uinst_t inst, uint32_t pc_ro)
+{
+    bool res = true;
+    bool pc_updated = false;
+
+    switch(inst.inst_id)
     {
-        printf("Error: failed executing instruction: "
-               "0x%08X at address 0x%08X\n", inst, dev->pc);
+    case INST_NOP:
+        break;
+
+    case INST_ADD:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] + dev->regs[inst.rs2]);
+        break;
+
+    case INST_SUB:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] - dev->regs[inst.rs2]);
+        break;
+
+    case INST_MUL:
+        {
+            int32_t prod = (int32_t)dev->regs[inst.rs1] * (int32_t)dev->regs[inst.rs2];
+            device_set_reg(dev, inst.rd, (uint32_t)prod);
+        }
+        break;
+
+    case INST_XOR:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] ^ dev->regs[inst.rs2]);
+        break;
+
+    case INST_DIV:
+        device_set_reg(dev, inst.rd, (uint32_t)((int32_t)dev->regs[inst.rs1] / \
+                                           (int32_t)dev->regs[inst.rs2]));
+        break;
+
+    case INST_OR:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] | dev->regs[inst.rs2]);
+        break;
+
+    case INST_REM:
+        device_set_reg(dev, inst.rd, (uint32_t)((int32_t)dev->regs[inst.rs1] % \
+                                           (int32_t)dev->regs[inst.rs2]));
+        break;
+
+    case INST_AND:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] & dev->regs[inst.rs2]);
+        break;
+
+    case INST_REMU:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] % dev->regs[inst.rs2]);
+        break;
+
+    case INST_CZERO_NEZ:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs2] ? 0 : dev->regs[inst.rs1]);
+        break;
+
+    case INST_SLL:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] << dev->regs[inst.rs2]);
+        break;
+
+    case INST_MULH:
+        {
+            int64_t op1 = (int64_t)(int32_t)dev->regs[inst.rs1];
+            int64_t op2 = (int64_t)(int32_t)dev->regs[inst.rs2];
+            int64_t prod = op1 * op2;
+            device_set_reg(dev, inst.rd, (uint32_t)(prod >> 32));
+        }
+        break;
+
+    case INST_SRL:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] >> dev->regs[inst.rs2]);
+        break;
+
+    case INST_SRA:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] >> dev->regs[inst.rs2]);
+        break;
+
+    case INST_DIVU:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] / dev->regs[inst.rs2]);
+        break;
+
+    case INST_CZERO_EQZ:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs2] ? dev->regs[inst.rs1] : 0);
+        break;
+
+    case INST_SLT:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] < \
+                                (int32_t)dev->regs[inst.rs2] ? 1 : 0);
+        break;
+
+    case INST_MULHSU:
+        {
+            int64_t prod = (int64_t)(int32_t)dev->regs[inst.rs1] * (uint64_t)dev->regs[inst.rs2];
+            device_set_reg(dev, inst.rd, (uint32_t)(prod >> 32));
+        }
+        break;
+
+    case INST_SLTU:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] < dev->regs[inst.rs2] ? 1 : 0);
+        break;
+
+    case INST_MULHU:
+        {
+            uint64_t prod = (uint64_t)dev->regs[inst.rs1] * (uint64_t)dev->regs[inst.rs2];
+            device_set_reg(dev, inst.rd, (uint32_t)(prod >> 32));
+        }
+        break;
+
+    case INST_ADDI:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] + inst.imm);
+        break;
+
+    case INST_XORI:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] ^ inst.imm);
+        break;
+
+    case INST_ORI:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] | inst.imm);
+        break;
+
+    case INST_ANDI:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] & inst.imm);
+        break;
+
+    case INST_SLLI:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] << (inst.imm & 0b11111));
+        break;
+
+    case INST_SRLI:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] >> (inst.imm & 0b11111));
+        break;
+
+    case INST_SRAI:
+        device_set_reg(dev, inst.rd,
+                       ((int32_t)(dev->regs[inst.rs1]) >> (inst.imm & 0b11111)));
+        break;
+
+    case INST_SLTI:
+        device_set_reg(dev, inst.rd, (int32_t)dev->regs[inst.rs1] < inst.imm ? 1 : 0);
+        break;
+
+    case INST_SLTIU:
+        device_set_reg(dev, inst.rd, dev->regs[inst.rs1] < \
+                                ((uint32_t)inst.imm & 0b111111111111) ? 1 : 0);
+        break;
+
+    case INST_SB:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            uint8_t bt = dev->regs[inst.rs2] & 0xff;
+            res = device_write(dev, addr, &bt, 1);
+        }
+        break;
+
+    case INST_SH:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            uint16_t hw = dev->regs[inst.rs2] & 0xffff;
+            res = device_write(dev, addr, (uint8_t*)&hw, 2);
+        }
+        break;
+
+    case INST_SW:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            res = device_write(dev, addr, (uint8_t*)&dev->regs[inst.rs2], 4);
+        }
+        break;
+
+    case INST_LB:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            int8_t sb;
+            res = device_read(dev, addr, (uint8_t*)&sb, 1);
+            device_set_reg(dev, inst.rd, (int32_t)sb);
+        }
+        break;
+
+    case INST_LH:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            int16_t shw;
+            res = device_read(dev, addr, (uint8_t*)&shw, 2);
+            device_set_reg(dev, inst.rd, (int32_t)shw);
+        }
+        break;
+
+    case INST_LW:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            uint32_t w;
+            res = device_read(dev, addr, (uint8_t*)&w, 4);
+            device_set_reg(dev, inst.rd, w);
+        }
+        break;
+
+    case INST_LBU:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            uint8_t ub;
+            res = device_read(dev, addr, &ub, 1);
+            device_set_reg(dev, inst.rd, ub);
+        }
+        break;
+
+    case INST_LHU:
+        {
+            uint32_t addr = dev->regs[inst.rs1] + inst.imm;
+            uint16_t hw;
+            res = device_read(dev, addr, (uint8_t*)&hw, 2);
+            device_set_reg(dev, inst.rd, hw);
+        }
+        break;
+
+    case INST_BEQ:
+        if ((int32_t)(dev->regs[inst.rs1]) == (int32_t)(dev->regs[inst.rs2]))
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BNE:
+        if ((int32_t)(dev->regs[inst.rs1]) != (int32_t)(dev->regs[inst.rs2]))
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BLT:
+        if ((int32_t)(dev->regs[inst.rs1]) < (int32_t)(dev->regs[inst.rs2]))
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BGE:
+        if ((int32_t)(dev->regs[inst.rs1]) >= (int32_t)(dev->regs[inst.rs2]))
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BLTU:
+        if (dev->regs[inst.rs1] < dev->regs[inst.rs2])
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BGEU:
+        if (dev->regs[inst.rs1] >= dev->regs[inst.rs2])
+        {
+            dev->pc += inst.imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_JAL:
+        device_set_reg(dev, inst.rd, pc_ro + 4);
+        dev->pc += inst.imm;
+        pc_updated = true;
+        break;
+
+    case INST_JALR:
+        device_set_reg(dev, inst.rd, pc_ro + 4);
+        dev->pc = dev->regs[inst.rs1] + inst.imm;
+        pc_updated = true;
+        break;
+
+    case INST_LUI:
+        device_set_reg(dev, inst.rd, inst.imm << 12);
+        break;
+
+    case INST_AUIPC:
+        device_set_reg(dev, inst.rd, pc_ro + (inst.imm << 12));
+        break;
+
+    case INST_ECALL:
+        break;
+
+    case INST_BREAK:
+        break;
+
+    case INST_INVALID:
+    default:
+        res = false;
+        break;
+
     }
 
     if (res && !pc_updated)
@@ -847,8 +1142,10 @@ bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro)
 
     dev->regs[0] = 0;
 
-    return res;    
+    return res;
 }
+
+
 
 
 static void *ilp_thread_proc(void *arg)
@@ -919,12 +1216,20 @@ bool device_run_cycle(device_t *dev)
 
             if (addr)
             {
-                if (!device_read(dev, addr, (uint8_t*)&inst, sizeof(inst)))
+                if (dev->uinsts && (addr <= dev->prog_end))
                 {
-                    return false;
+                    uint32_t inst_id = (addr - dev->rom.origin) / 4;
+                    res = res && device_run_unpacked_instruction(dev, dev->uinsts[inst_id], addr);
                 }
+                else
+                {
+                    if (!device_read(dev, addr, (uint8_t*)&inst, sizeof(inst)))
+                    {
+                        return false;
+                    }
 
-                res = res && device_run_instruction(dev, inst, addr);
+                    res = res && device_run_instruction(dev, inst, addr);
+                }
             }
         }
 #else
@@ -936,12 +1241,20 @@ bool device_run_cycle(device_t *dev)
     }
     else
     {
-        if (!device_read(dev, dev->pc, (uint8_t*)&inst, sizeof(inst)))
+        if (dev->uinsts && (dev->pc <= dev->prog_end))
         {
-            return false;
+            uint32_t inst_id = (dev->pc - dev->rom.origin) / 4;
+            res = device_run_unpacked_instruction(dev, dev->uinsts[inst_id], dev->pc);
         }
-        
-        res = device_run_instruction(dev, inst, dev->pc);
+        else
+        {
+            if (!device_read(dev, dev->pc, (uint8_t*)&inst, sizeof(inst)))
+            {
+                return false;
+            }
+            
+            res = device_run_instruction(dev, inst, dev->pc);
+        }
     }
 
     return res;

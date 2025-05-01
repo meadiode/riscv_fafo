@@ -38,6 +38,7 @@ int main(int argc, char **argv)
         }
     }
 
+    device_pre_unpack_instructions(&dev);
 
     InitWindow(640, 400, "RISC-V device");
 
