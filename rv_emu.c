@@ -905,6 +905,7 @@ static bool device_run_unpacked_instruction(device_t *dev, uinst_t inst, uint32_
             int64_t op1 = (int64_t)(int32_t)dev->regs[inst.rs1];
             int64_t op2 = (int64_t)(int32_t)dev->regs[inst.rs2];
             int64_t prod = op1 * op2;
+            // printf("MULH: 0x%08X * 0x%08X = 0x%08X\n", dev->regs[inst.rs1], dev->regs[inst.rs2], (uint32_t)(prod >> 32));
             device_set_reg(dev, inst.rd, (uint32_t)(prod >> 32));
         }
         break;

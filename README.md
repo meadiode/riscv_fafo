@@ -2,7 +2,7 @@
 # Experiments with a minimal RISC-V emulator
 
 The emulator:
- - Base RV32I instructions only
+ - Base RV32I, M, Zicond instructions
  - Bare implementation of: serial output, 320x200 display, RTC
  - Can run DOOM
 
@@ -26,7 +26,7 @@ Configure & make:
 ```
 mkdir build
 cd build
-cmake -G Ninja ../llvm -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TARGETS_TO_BUILD="RISCV" -DLLVM_DEFAULT_TARGET_TRIPLE=riscv32-unknown-elf -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/michael/bin/riscv-llvm
+cmake -G Ninja ../llvm -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TARGETS_TO_BUILD="RISCV" -DLLVM_DEFAULT_TARGET_TRIPLE=riscv32-unknown-elf -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=[desired executable location]
 
 ninja
 ninja install

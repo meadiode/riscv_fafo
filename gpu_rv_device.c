@@ -12,7 +12,7 @@
 #include "system.h"
 
 
-#define NUM_CPUS  64u
+#define NUM_CPUS  9u
 #define ROM_SIZE  (1024u * 1024u * 16u)
 #define RAM_SIZE  (1024u * 1024u * 8u)
 
@@ -22,22 +22,24 @@ typedef struct
     uint32_t regs[32];
     uint32_t pc;
     uint32_t exit_addr;
-    uint8_t periph[40];
+    uint8_t periph[64];
 
 } cpu_t;
 
+// #define EMU_CROSSCHECK 1
 
-#define NUM_DISPS_IN_ROW    8
+#define NUM_DISPS_IN_ROW    3
 #define NUM_DISPS_IN_COLUMN (NUM_CPUS / NUM_DISPS_IN_ROW)
 #define DISP_TEX_WIDTH      (NUM_DISPS_IN_ROW * DISP_WIDTH)
 #define DISP_TEX_HEIGHT     (NUM_DISPS_IN_COLUMN * DISP_HEIGHT)
 
 static uint8_t rom_img[ROM_SIZE] = {0};
-static uint8_t ram_img[RAM_SIZE * NUM_CPUS] = {0};
+static uint8_t ram_img[RAM_SIZE] = {0};
 static cpu_t cpus[NUM_CPUS] = {0};
 static device_t dev = {0};
 
 static uint32_t rv_cycles_count = 0;
+static uint64_t rv_total_cycles = 0;
 static float rv_cycles_time = 0.0;
 
 int main(void)
@@ -52,7 +54,7 @@ int main(void)
     unsigned int rv_emu_prog = rlLoadComputeShaderProgram(rv_emu_shader);
     UnloadFileText(rv_emu_code);
 
-    uint32_t n_cycles = 50000;
+    uint32_t n_cycles = 100000;
     int n_cycles_loc = rlGetLocationUniform(rv_emu_prog, "n_cycles");
 
     uint32_t time_ms = 0;
@@ -61,22 +63,31 @@ int main(void)
     device_init(&dev,
                 ROM_SIZE,   0x08000000,    /* FLASH */
                 RAM_SIZE,   0x20000000,    /* RAM */
-                40 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, RTC, screen buffer 320x200 */
+                64 + DISP_VRAM_SIZE, 0x01000000);  /* Peripherals: serial tx/rx, RTC, screen buffer 320x200 */
 
     // device_load_from_elf(&dev, "./build/prog05.elf");
     device_load_from_elf(&dev, "./doomgeneric/doomgeneric/doomrv.elf");
+    
+    device_pre_unpack_instructions(&dev);
+    uint32_t num_insts = (dev.prog_end - dev.rom.origin) / 4;
 
     memcpy(rom_img, dev.rom.data, dev.rom.size);
+    memcpy(ram_img, dev.ram.data, RAM_SIZE);
 
     for (int i = 0; i < NUM_CPUS; i++)
     {
-        memcpy(ram_img + i * RAM_SIZE, dev.ram.data, RAM_SIZE);
         cpus[i].pc = dev.pc;
     }
 
     unsigned int ssbo_rom = rlLoadShaderBuffer(ROM_SIZE, rom_img, RL_DYNAMIC_COPY);
-    unsigned int ssbo_ram = rlLoadShaderBuffer(sizeof(ram_img), ram_img, RL_DYNAMIC_COPY);
+    unsigned int ssbo_ram = rlLoadShaderBuffer(sizeof(ram_img) * NUM_CPUS, NULL, RL_DYNAMIC_COPY);
     unsigned int ssbo_cpus = rlLoadShaderBuffer(sizeof(cpus), cpus, RL_DYNAMIC_COPY);
+    unsigned int ssbo_uinsts = rlLoadShaderBuffer(sizeof(uinst_t) * num_insts, dev.uinsts, RL_DYNAMIC_COPY);
+
+    for (int i = 0; i < NUM_CPUS; i++)
+    {
+        rlUpdateShaderBuffer(ssbo_ram, ram_img, sizeof(ram_img), sizeof(ram_img) * i);
+    }
 
     Image img = GenImageColor(DISP_TEX_WIDTH, DISP_TEX_HEIGHT, GRAY);
     Texture disp_texts[2] = {0};
@@ -90,17 +101,25 @@ int main(void)
         
         rlEnableShader(rv_emu_prog);
 
-        time_ms = (uint32_t)(GetTime() * 1000.0);
+        // if (rv_total_cycles >= 166000000)
+        // {
+        //     n_cycles = 1;
+        // }
+
+        // time_ms = (uint32_t)(GetTime() * 1000.0);
+        time_ms += 1000;
         rlSetUniform(time_ms_loc, &time_ms, RL_SHADER_UNIFORM_UINT, 1);
         rlSetUniform(n_cycles_loc, &n_cycles, RL_SHADER_UNIFORM_UINT, 1);
         rlBindImageTexture(disp_texts[tex_idx].id, 0, RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, false);
         rlBindShaderBuffer(ssbo_cpus, 1);
         rlBindShaderBuffer(ssbo_rom, 2);
         rlBindShaderBuffer(ssbo_ram, 3);
+        rlBindShaderBuffer(ssbo_uinsts, 4);
         rlComputeShaderDispatch(NUM_DISPS_IN_ROW, NUM_DISPS_IN_COLUMN, 1);
         rlDisableShader();
 
         rv_cycles_count += n_cycles;
+        rv_total_cycles += n_cycles;
         rv_cycles_time += GetFrameTime();
 
         if (rv_cycles_time >= 1.0)
@@ -149,6 +168,12 @@ int main(void)
         for (int i = 0; i < n_cycles; i++)
         {
             emres = emres && device_run_cycle(&dev);
+
+            if (dev.periph.data[0x0c])
+            {
+                dev.periph.data[0x0c] = 0;
+                *((uint32_t*)&dev.periph.data[0x04]) = time_ms;
+            }            
         }
 
         if (!emres)
@@ -158,9 +183,9 @@ int main(void)
             break;
         }
 
-        rlReadShaderBuffer(ssbo_ram, cpus, sizeof(cpu_t) * NUM_CPUS, 0);
+        rlReadShaderBuffer(ssbo_cpus, cpus, sizeof(cpu_t) * NUM_CPUS, 0);
 
-        for (int cpuid = 0; cpuid < NUM_CPUS; cpuid++)
+        for (int cpuid = 0; cpuid < 1; cpuid++)
         {
             if (dev.pc != cpus[cpuid].pc || memcmp(dev.regs, cpus[cpuid].regs, sizeof(uint32_t) * 32))
             {
@@ -169,7 +194,16 @@ int main(void)
 
                 for (int i = 0; i < 32; i++)
                 {
-                    printf("CPU CPU R%02u: 0x%08X  GPU CPU R%02u: 0x%08X\n", i, dev.regs[i], i, cpus[cpuid].regs[i]);
+                    printf("CPU CPU R%02u: 0x%08X  GPU CPU R%02u: 0x%08X", i, dev.regs[i], i, cpus[cpuid].regs[i]);
+
+                    if (dev.regs[i] != cpus[cpuid].regs[i])
+                    {
+                        printf(" *\n");
+                    }
+                    else
+                    {
+                        printf("\n");
+                    }
                 }
                 mismatch = true;
                 printf("GPU CPU %u failed!\n", cpuid);
@@ -179,8 +213,11 @@ int main(void)
 
         if (mismatch)
         {
+            printf("Total cycles: %llu\n", rv_total_cycles);
+
             break;
         }
+
 #endif
 
         EndDrawing();
