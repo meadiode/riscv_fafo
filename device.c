@@ -96,6 +96,8 @@ int main(int argc, char **argv)
                     dev.periph.data[0x24] = 0;
                     memcpy(canvas.data, &dev.periph.data[0x28], DISP_VRAM_SIZE);
                     printf("CPU cycles per frame: %lu\n", frame_cycles);
+                    device_printout_instruction_stats(&dev);
+                    // memset(dev.inst_stats, 0, sizeof(dev.inst_stats));
                     frame_cycles = 0;
                     fflush(stdout);
                     break;

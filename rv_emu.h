@@ -8,6 +8,67 @@
 #include <stdbool.h>
 #include <pthread.h>
 
+
+enum
+{
+    INST_NOP,
+
+    INST_ADD,
+    INST_SUB,
+    INST_MUL,
+    INST_XOR,
+    INST_DIV,
+    INST_OR,
+    INST_REM,
+    INST_AND,
+    INST_REMU,
+    INST_CZERO_NEZ,
+    INST_SLL,
+    INST_MULH,
+    INST_SRL,
+    INST_SRA,
+    INST_DIVU,
+    INST_CZERO_EQZ,
+    INST_SLT,
+    INST_MULHSU,
+    INST_SLTU,
+    INST_MULHU,
+    INST_ADDI,
+    INST_XORI,
+    INST_ORI,
+    INST_ANDI,
+    INST_SLLI,
+    INST_SRLI,
+    INST_SRAI,
+    INST_SLTI,
+    INST_SLTIU,
+    INST_SB,
+    INST_SH,
+    INST_SW,
+    INST_LB,
+    INST_LH,
+    INST_LW,
+    INST_LBU,
+    INST_LHU,
+    INST_BEQ,
+    INST_BNE,
+    INST_BLT,
+    INST_BGE,
+    INST_BLTU,
+    INST_BGEU,
+    INST_JAL,
+    INST_JALR,
+    INST_LUI,
+    INST_AUIPC,
+    INST_ECALL,
+    INST_BREAK,
+
+    INST_INVALID,
+
+    NUM_INSTS,
+};
+
+
 typedef struct
 {
     uint32_t origin;
@@ -72,6 +133,8 @@ typedef struct
     pthread_barrier_t ilp_barrier1;
     pthread_barrier_t ilp_barrier2;
 
+    uint64_t inst_stats[NUM_INSTS];
+
 } device_t;
 
 
@@ -135,66 +198,6 @@ typedef struct
 } sym_t;
 
 
-enum
-{
-    INST_NOP,
-
-    INST_ADD,
-    INST_SUB,
-    INST_MUL,
-    INST_XOR,
-    INST_DIV,
-    INST_OR,
-    INST_REM,
-    INST_AND,
-    INST_REMU,
-    INST_CZERO_NEZ,
-    INST_SLL,
-    INST_MULH,
-    INST_SRL,
-    INST_SRA,
-    INST_DIVU,
-    INST_CZERO_EQZ,
-    INST_SLT,
-    INST_MULHSU,
-    INST_SLTU,
-    INST_MULHU,
-    INST_ADDI,
-    INST_XORI,
-    INST_ORI,
-    INST_ANDI,
-    INST_SLLI,
-    INST_SRLI,
-    INST_SRAI,
-    INST_SLTI,
-    INST_SLTIU,
-    INST_SB,
-    INST_SH,
-    INST_SW,
-    INST_LB,
-    INST_LH,
-    INST_LW,
-    INST_LBU,
-    INST_LHU,
-    INST_BEQ,
-    INST_BNE,
-    INST_BLT,
-    INST_BGE,
-    INST_BLTU,
-    INST_BGEU,
-    INST_JAL,
-    INST_JALR,
-    INST_LUI,
-    INST_AUIPC,
-    INST_ECALL,
-    INST_BREAK,
-
-    INST_INVALID,
-
-    NUM_INSTS,
-};
-
-
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
                  uint32_t ram_size, uint32_t ram_origin,
@@ -208,6 +211,7 @@ void device_set_reg(device_t *dev, int rd, uint32_t val);
 bool device_run_instruction(device_t *dev, uint32_t inst, uint32_t pc_ro);
 bool device_run_cycle(device_t *dev);
 bool device_pre_unpack_instructions(device_t *dev);
+void device_printout_instruction_stats(device_t *dev);
 
 
 #endif

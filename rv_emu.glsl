@@ -303,17 +303,17 @@ bool device_read_word(in uint dev_id, in uint addr, out uint data)
 {
     bool res = true;
 
-    if (0 == (addr & 0x03))
-    {
+    // if (0 == (addr & 0x03))
+    // {
         if (addr >= RAM_START)
         {
             uint offset = addr - RAM_START;
             uint word_id = offset >> 2;
             
-            if (word_id >= RAM_SIZE)
-            {
-                return false;
-            }
+            // if (word_id >= RAM_SIZE)
+            // {
+            //     return false;
+            // }
 
             data = ram[dev_id * RAM_SIZE + word_id];
         }
@@ -322,38 +322,39 @@ bool device_read_word(in uint dev_id, in uint addr, out uint data)
             uint offset = addr - ROM_START;
             uint word_id = offset >> 2;
             
-            if (word_id >= ROM_SIZE)
-            {
-                return false;
-            }
+            // if (word_id >= ROM_SIZE)
+            // {
+            //     return false;
+            // }
 
             data = rom[word_id];
         }
-        else if (addr >= PERIPH_START)
+        // else if (addr >= PERIPH_START)
+        else
         {
             uint offset = addr - PERIPH_START;
             uint word_id = offset >> 2;
             
-            if (word_id >= PERIPH_SIZE)
-            {
-                return false;
-            }
+            // if (word_id >= PERIPH_SIZE)
+            // {
+            //     return false;
+            // }
 
             data = cpus[dev_id].periph[word_id];
         }
-    }
-    else
-    {
-        uint val = 0;
-        res = res && device_read_byte(dev_id, addr, val);
-        data = val;
-        res = res && device_read_byte(dev_id, addr + 1, val);
-        data |= (val << 8);
-        res = res && device_read_byte(dev_id, addr + 2, val);
-        data |= (val << 16);
-        res = res && device_read_byte(dev_id, addr + 3, val);
-        data |= (val << 24);
-    }
+    // }
+    // else
+    // {
+    //     uint val = 0;
+    //     res = res && device_read_byte(dev_id, addr, val);
+    //     data = val;
+    //     res = res && device_read_byte(dev_id, addr + 1, val);
+    //     data |= (val << 8);
+    //     res = res && device_read_byte(dev_id, addr + 2, val);
+    //     data |= (val << 16);
+    //     res = res && device_read_byte(dev_id, addr + 3, val);
+    //     data |= (val << 24);
+    // }
 
     return res;
 }
@@ -437,6 +438,122 @@ bool run_cycle(in uint dev_id)
 
     switch (opcode)
     {
+
+    case 0x03: /* Load ops */
+    {
+        uint rd = (inst >> 7) & 0x1f;
+        uint funct3 = (inst >> 12) & 0x07;
+        uint rs1 = (inst >> 15) & 0x1f;
+        int imm = int((inst >> 20) & 0xfff);
+        imm = (imm << 20) >> 20;
+        uint addr = cpus[dev_id].regs[rs1] + imm;
+        uint data;
+
+        switch (funct3)
+        {
+        case 0x02: /* lw */
+            res = device_read_word(dev_id, addr, data);
+            cpus[dev_id].regs[rd] = data;
+            break;
+
+        case 0x00: /* lb */
+            res = device_read_byte(dev_id, addr, data);
+            cpus[dev_id].regs[rd] = uint((int(data) << 24) >> 24);
+            break;
+
+        case 0x01: /* lh */
+            res = device_read_hword(dev_id, addr, data);
+            cpus[dev_id].regs[rd] = uint((int(data) << 16) >> 16);
+            break;
+
+        case 0x04: /* lbu */
+            res = device_read_byte(dev_id, addr, data);
+            cpus[dev_id].regs[rd] = data;
+            break;
+
+        case 0x05: /* lhu */
+            res = device_read_hword(dev_id, addr, data);
+            cpus[dev_id].regs[rd] = data;
+            break;
+
+        default:
+            res = false;
+            break;
+        }
+    }
+    break;
+
+    case 0x13: /* Integer Register-Immediate ops */
+    {
+        uint rd = (inst >> 7) & 0x1f;
+        uint funct3 = (inst >> 12) & 0x07;
+        uint rs1 = (inst >> 15) & 0x1f;
+        int imm = int((inst >> 20) & 0xfff);
+        imm = (imm << 20) >> 20;
+
+        switch (funct3)
+        {
+        case 0x00:  /* addi */
+            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) + imm;
+            break;
+
+        case 0x04: /* xori */
+            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) ^ imm;
+            break;
+
+        case 0x06: /* ori */
+            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) | imm;
+            break;
+
+        case 0x07: /* andi */
+            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) & imm;
+            break;
+
+        case 0x01:
+            switch (imm >> 5)
+            {
+            case 0x00: /* slli */
+                cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] << (imm & 0x1f);
+                break;
+
+            default:    
+                res = false;
+            }
+            break;
+
+        case 0x05:
+            switch (imm >> 5)
+            {
+            case 0x00: /* srli */
+                cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] >> (imm & 0x1f);
+                break;
+
+            case 0x20: /* srai */
+                cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) >> (imm & 0x1f);
+                break;
+
+            default:
+                res = false;
+            }
+            break;
+
+        case 0x02: /* slti */
+            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) < imm ? 1 : 0;
+            break;
+
+        case 0x03: /* sltiu */
+            cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] < (uint(imm) & 0xfff) ? 1 : 0;
+            break;
+
+        default:
+            res = false;
+            break;
+        }
+
+    }
+    break;
+
+
     case 0x33: /*  Integer Register-Register ops */
     {
         uint rd = (inst >> 7) & 0x1f;
@@ -598,76 +715,6 @@ bool run_cycle(in uint dev_id)
     }
     break;
 
-    case 0x13: /* Integer Register-Immediate ops */
-    {
-        uint rd = (inst >> 7) & 0x1f;
-        uint funct3 = (inst >> 12) & 0x07;
-        uint rs1 = (inst >> 15) & 0x1f;
-        int imm = int((inst >> 20) & 0xfff);
-        imm = (imm << 20) >> 20;
-
-        switch (funct3)
-        {
-        case 0x00:  /* addi */
-            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) + imm;
-            break;
-
-        case 0x04: /* xori */
-            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) ^ imm;
-            break;
-
-        case 0x06: /* ori */
-            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) | imm;
-            break;
-
-        case 0x07: /* andi */
-            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) & imm;
-            break;
-
-        case 0x01:
-            switch (imm >> 5)
-            {
-            case 0x00: /* slli */
-                cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] << (imm & 0x1f);
-                break;
-
-            default:    
-                res = false;
-            }
-            break;
-
-        case 0x05:
-            switch (imm >> 5)
-            {
-            case 0x00: /* srli */
-                cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] >> (imm & 0x1f);
-                break;
-
-            case 0x20: /* srai */
-                cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) >> (imm & 0x1f);
-                break;
-
-            default:
-                res = false;
-            }
-            break;
-
-        case 0x02: /* slti */
-            cpus[dev_id].regs[rd] = int(cpus[dev_id].regs[rs1]) < imm ? 1 : 0;
-            break;
-
-        case 0x03: /* sltiu */
-            cpus[dev_id].regs[rd] = cpus[dev_id].regs[rs1] < (uint(imm) & 0xfff) ? 1 : 0;
-            break;
-
-        default:
-            res = false;
-            break;
-        }
-
-    }
-    break;
-
     case 0x23: /* Store ops */
     {
         int imm = int((inst >> 7) & 0x1f);
@@ -691,50 +738,6 @@ bool run_cycle(in uint dev_id)
 
         case 0x02: /* sw */
             device_write_word(dev_id, addr, cpus[dev_id].regs[rs2]);
-            break;
-
-        default:
-            res = false;
-            break;
-        }
-    }
-    break;
-
-    case 0x03: /* Load ops */
-    {
-        uint rd = (inst >> 7) & 0x1f;
-        uint funct3 = (inst >> 12) & 0x07;
-        uint rs1 = (inst >> 15) & 0x1f;
-        int imm = int((inst >> 20) & 0xfff);
-        imm = (imm << 20) >> 20;
-        uint addr = cpus[dev_id].regs[rs1] + imm;
-        uint data;
-
-        switch (funct3)
-        {
-        case 0x00: /* lb */
-            res = device_read_byte(dev_id, addr, data);
-            cpus[dev_id].regs[rd] = uint((int(data) << 24) >> 24);
-            break;
-
-        case 0x01: /* lh */
-            res = device_read_hword(dev_id, addr, data);
-            cpus[dev_id].regs[rd] = uint((int(data) << 16) >> 16);
-            break;
-
-        case 0x02: /* lw */
-            res = device_read_word(dev_id, addr, data);
-            cpus[dev_id].regs[rd] = data;
-            break;
-
-        case 0x04: /* lbu */
-            res = device_read_byte(dev_id, addr, data);
-            cpus[dev_id].regs[rd] = data;
-            break;
-
-        case 0x05: /* lhu */
-            res = device_read_hword(dev_id, addr, data);
-            cpus[dev_id].regs[rd] = data;
             break;
 
         default:
@@ -928,150 +931,13 @@ bool run_unpacked_instruction(in uint dev_id)
 
     switch (uinsts[inst_idx].inst_id)
     {
-    case INST_NOP:
-        break;
-
-    case INST_ADD:
-        cpus[dev_id].regs[rd] = rs1val + rs2val;
-        break;
-
-    case INST_SUB:
-        cpus[dev_id].regs[rd] = rs1val - rs2val;
-        break;
-
-    case INST_MUL:
-        cpus[dev_id].regs[rd] = rs1val * rs2val;
-        break;
-
-    case INST_XOR:
-        cpus[dev_id].regs[rd] = rs1val ^ rs2val;
-        break;
-
-    case INST_DIV:
-        cpus[dev_id].regs[rd] = uint(int(rs1val) / int(rs2val));
-        break;
-
-    case INST_OR:
-        cpus[dev_id].regs[rd] = rs1val | rs2val;
-        break;
-
-    case INST_REM:
-        cpus[dev_id].regs[rd] = uint(int(rs1val) % int(rs2val));
-        break;
-
-    case INST_AND:
-        cpus[dev_id].regs[rd] = rs1val & rs2val;
-        break;
-
-    case INST_REMU:
-        cpus[dev_id].regs[rd] = rs1val % rs2val;
-        break;
-
-    case INST_CZERO_NEZ:
-        cpus[dev_id].regs[rd] = bool(rs2val) ? 0 : rs1val;
-        break;
-
-    case INST_SLL:
-        cpus[dev_id].regs[rd] = rs1val << rs2val;
-        break;
-
-    case INST_MULH:
-        cpus[dev_id].regs[rd] = mulh(int(rs1val), int(rs2val));
-        break;
-
-    case INST_SRL:
-        cpus[dev_id].regs[rd] = rs1val >> rs2val;
-        break;
-
-    case INST_SRA:
-        cpus[dev_id].regs[rd] = int(rs1val) >> rs2val;
-        break;
-
-    case INST_DIVU:
-        cpus[dev_id].regs[rd] = rs1val / rs2val;
-        break;
-
-    case INST_CZERO_EQZ:
-        cpus[dev_id].regs[rd] = bool(rs2val) ? rs1val : 0;
-        break;
-
-    case INST_SLT:
-        cpus[dev_id].regs[rd] = int(rs1val) < int(rs2val) ? 1 : 0;
-        break;
-
-    case INST_MULHSU:
-        cpus[dev_id].regs[rd] = mulhsu(int(rs1val), rs2val);
-        break;
-
-    case INST_SLTU:
-        cpus[dev_id].regs[rd] = rs1val < rs2val ? 1 : 0;
-        break;
-
-    case INST_MULHU:
-        cpus[dev_id].regs[rd] = mulhu(rs1val, rs2val);
+    case INST_LW:
+        res = device_read_word(dev_id, addr, data);
+        cpus[dev_id].regs[rd] = data;
         break;
 
     case INST_ADDI:
         cpus[dev_id].regs[rd] = int(rs1val) + imm;
-        break;
-
-    case INST_XORI:
-        cpus[dev_id].regs[rd] = int(rs1val) ^ imm;
-        break;
-
-    case INST_ORI:
-        cpus[dev_id].regs[rd] = int(rs1val) | imm;
-        break;
-
-    case INST_ANDI:
-        cpus[dev_id].regs[rd] = int(rs1val) & imm;
-        break;
-
-    case INST_SLLI:
-        cpus[dev_id].regs[rd] = rs1val << (imm & 0x1f);
-        break;
-
-    case INST_SRLI:
-        cpus[dev_id].regs[rd] = rs1val >> (imm & 0x1f);
-        break;
-
-    case INST_SRAI:
-        cpus[dev_id].regs[rd] = int(rs1val) >> (imm & 0x1f);
-        break;
-
-    case INST_SLTI:
-        cpus[dev_id].regs[rd] = int(rs1val) < imm ? 1 : 0;
-        break;
-
-    case INST_SLTIU:
-        cpus[dev_id].regs[rd] = rs1val < (uint(imm) & 0xfff) ? 1 : 0;
-        break;
-
-    case INST_SB:
-        device_write_byte(dev_id, addr, rs2val & 0xff);
-        break;
-
-    case INST_SH:
-        device_write_hword(dev_id, addr, rs2val & 0xffff);
-        break;
-
-    case INST_SW:
-        device_write_word(dev_id, addr, rs2val);
-        break;
-
-    case INST_LB:
-        res = device_read_byte(dev_id, addr, data);
-        cpus[dev_id].regs[rd] = uint((int(data) << 24) >> 24);
-        break;
-
-    case INST_LH:
-        res = device_read_hword(dev_id, addr, data);
-        cpus[dev_id].regs[rd] = uint((int(data) << 16) >> 16);
-        break;
-
-    case INST_LW:
-        res = device_read_word(dev_id, addr, data);
-        cpus[dev_id].regs[rd] = data;
         break;
 
     case INST_LBU:
@@ -1079,21 +945,60 @@ bool run_unpacked_instruction(in uint dev_id)
         cpus[dev_id].regs[rd] = data;
         break;
 
-    case INST_LHU:
-        res = device_read_hword(dev_id, addr, data);
-        cpus[dev_id].regs[rd] = data;
+    case INST_SLLI:
+        cpus[dev_id].regs[rd] = rs1val << (imm & 0x1f);
         break;
 
-    case INST_BEQ:
-        if (rs1val == rs2val)
+    case INST_SB:
+        device_write_byte(dev_id, addr, rs2val & 0xff);
+        break;
+
+    case INST_SRLI:
+        cpus[dev_id].regs[rd] = rs1val >> (imm & 0x1f);
+        break;
+
+    case INST_ADD:
+        cpus[dev_id].regs[rd] = rs1val + rs2val;
+        break;
+
+    case INST_BLTU:
+        if (rs1val < rs2val)
         {
             cpus[dev_id].pc += imm;
             pc_updated = true;
         }
         break;
 
+    case INST_SRL:
+        cpus[dev_id].regs[rd] = rs1val >> rs2val;
+        break;
+
+    case INST_OR:
+        cpus[dev_id].regs[rd] = rs1val | rs2val;
+        break;
+
+    case INST_SUB:
+        cpus[dev_id].regs[rd] = rs1val - rs2val;
+        break;
+
+    case INST_SLL:
+        cpus[dev_id].regs[rd] = rs1val << rs2val;
+        break;
+
+    case INST_SRA:
+        cpus[dev_id].regs[rd] = int(rs1val) >> rs2val;
+        break;
+
     case INST_BNE:
         if (rs1val != rs2val)
+        {
+            cpus[dev_id].pc += imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_BEQ:
+        if (rs1val == rs2val)
         {
             cpus[dev_id].pc += imm;
             pc_updated = true;
@@ -1116,20 +1021,24 @@ bool run_unpacked_instruction(in uint dev_id)
         }
         break;
 
-    case INST_BLTU:
-        if (rs1val < rs2val)
-        {
-            cpus[dev_id].pc += imm;
-            pc_updated = true;
-        }
+    case INST_SW:
+        device_write_word(dev_id, addr, rs2val);
         break;
 
-    case INST_BGEU:
-        if (rs1val >= rs2val)
-        {
-            cpus[dev_id].pc += imm;
-            pc_updated = true;
-        }
+    case INST_LUI:
+        cpus[dev_id].regs[rd] = imm << 12;
+        break;
+
+    case INST_SRAI:
+        cpus[dev_id].regs[rd] = int(rs1val) >> (imm & 0x1f);
+        break;
+
+    case INST_ANDI:
+        cpus[dev_id].regs[rd] = int(rs1val) & imm;
+        break;
+
+    case INST_AND:
+        cpus[dev_id].regs[rd] = rs1val & rs2val;
         break;
 
     case INST_JAL:
@@ -1144,16 +1053,110 @@ bool run_unpacked_instruction(in uint dev_id)
         pc_updated = true;
         break;
 
-    case INST_LUI:
-        cpus[dev_id].regs[rd] = imm << 12;
+    case INST_MUL:
+        cpus[dev_id].regs[rd] = rs1val * rs2val;
+        break;
+
+    case INST_LH:
+        res = device_read_hword(dev_id, addr, data);
+        cpus[dev_id].regs[rd] = uint((int(data) << 16) >> 16);
+        break;
+
+    case INST_SH:
+        device_write_hword(dev_id, addr, rs2val & 0xffff);
+        break;
+
+    case INST_BGEU:
+        if (rs1val >= rs2val)
+        {
+            cpus[dev_id].pc += imm;
+            pc_updated = true;
+        }
+        break;
+
+    case INST_MULH:
+        cpus[dev_id].regs[rd] = mulh(int(rs1val), int(rs2val));
+        break;
+
+    case INST_LHU:
+        res = device_read_hword(dev_id, addr, data);
+        cpus[dev_id].regs[rd] = data;
+        break;
+
+    case INST_XOR:
+        cpus[dev_id].regs[rd] = rs1val ^ rs2val;
+        break;
+
+    case INST_SLTIU:
+        cpus[dev_id].regs[rd] = rs1val < (uint(imm) & 0xfff) ? 1 : 0;
+        break;
+
+    case INST_SLT:
+        cpus[dev_id].regs[rd] = int(rs1val) < int(rs2val) ? 1 : 0;
+        break;
+
+    case INST_CZERO_EQZ:
+        cpus[dev_id].regs[rd] = bool(rs2val) ? rs1val : 0;
+        break;
+
+    case INST_DIVU:
+        cpus[dev_id].regs[rd] = rs1val / rs2val;
+        break;
+
+    case INST_REMU:
+        cpus[dev_id].regs[rd] = rs1val % rs2val;
+        break;
+
+    case INST_CZERO_NEZ:
+        cpus[dev_id].regs[rd] = bool(rs2val) ? 0 : rs1val;
+        break;
+
+    case INST_XORI:
+        cpus[dev_id].regs[rd] = int(rs1val) ^ imm;
+        break;
+
+    case INST_DIV:
+        cpus[dev_id].regs[rd] = uint(int(rs1val) / int(rs2val));
+        break;
+
+    case INST_SLTI:
+        cpus[dev_id].regs[rd] = int(rs1val) < imm ? 1 : 0;
+        break;
+
+    case INST_SLTU:
+        cpus[dev_id].regs[rd] = rs1val < rs2val ? 1 : 0;
+        break;
+
+    case INST_LB:
+        res = device_read_byte(dev_id, addr, data);
+        cpus[dev_id].regs[rd] = uint((int(data) << 24) >> 24);
         break;
 
     case INST_AUIPC:
         cpus[dev_id].regs[rd] = cpus[dev_id].pc + (imm << 12);
         break;
 
+    case INST_ORI:
+        cpus[dev_id].regs[rd] = int(rs1val) | imm;
+        break;
+
+    case INST_MULHU:
+        cpus[dev_id].regs[rd] = mulhu(rs1val, rs2val);
+        break;
+
+    case INST_REM:
+        cpus[dev_id].regs[rd] = uint(int(rs1val) % int(rs2val));
+        break;
+
     case INST_ECALL:
         /* Nothing for now */
+        break;
+
+    case INST_MULHSU:
+        cpus[dev_id].regs[rd] = mulhsu(int(rs1val), rs2val);
+        break;
+
+    case INST_NOP:
         break;
 
     case INST_BREAK:
@@ -1184,8 +1187,8 @@ void main()
     for (uint i = 0; (i < n_cycles) && (cpus[dev_id].periph[9] == 0); i++)
     // for (uint i = 0; i < n_cycles; i++)
     {
-        run_cycle(dev_id);
-        // run_unpacked_instruction(dev_id);
+        // run_cycle(dev_id);
+        run_unpacked_instruction(dev_id);
 
         // if (0 != cpus[dev_id].periph[9])
         // {

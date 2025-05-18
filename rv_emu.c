@@ -9,6 +9,7 @@ static bool mem_read(mem_t *mem, uint32_t addr,
 static void *ilp_thread_proc(void *arg);
 static bool unpack_instruction(uint32_t inst, uinst_t *uinst);
 static bool device_run_unpacked_instruction(device_t *dev, uinst_t inst, uint32_t pc_ro);
+static const char *str_inst(uint32_t inst_id);
 
 void device_init(device_t *dev,
                  uint32_t rom_size, uint32_t rom_origin,
@@ -1143,10 +1144,108 @@ static bool device_run_unpacked_instruction(device_t *dev, uinst_t inst, uint32_
 
     dev->regs[0] = 0;
 
+
+    if (res)
+    {
+        dev->inst_stats[inst.inst_id]++;
+    }
+
     return res;
 }
 
 
+static const char *str_inst(uint32_t inst_id)
+{
+    const char* const STR_INST[] = 
+    {
+        "nop",
+        "add",
+        "sub",
+        "mul",
+        "xor",
+        "div",
+        "or",
+        "rem",
+        "and",
+        "remu",
+        "czero_nez",
+        "sll",
+        "mulh",
+        "srl",
+        "sra",
+        "divu",
+        "czero_eqz",
+        "slt",
+        "mulhsu",
+        "sltu",
+        "mulhu",
+        "addi",
+        "xori",
+        "ori",
+        "andi",
+        "slli",
+        "srli",
+        "srai",
+        "slti",
+        "sltiu",
+        "sb",
+        "sh",
+        "sw",
+        "lb",
+        "lh",
+        "lw",
+        "lbu",
+        "lhu",
+        "beq",
+        "bne",
+        "blt",
+        "bge",
+        "bltu",
+        "bgeu",
+        "jal",
+        "jalr",
+        "lui",
+        "auipc",
+        "ecall",
+        "break",
+        "wtf",
+    };
+
+    if (inst_id < NUM_INSTS)
+    {
+        return STR_INST[inst_id];
+    }
+
+    return STR_INST[INST_INVALID];
+}
+
+
+void device_printout_instruction_stats(device_t *dev)
+{
+    printf("Instruction stats:\n");
+    printf("{");
+
+    for (int i = 0; i < NUM_INSTS; i++)
+    {
+        if ((i % 8) == 0)
+        {
+            printf("\n    ");
+        }
+
+        printf("\"%s\": %llu", str_inst(i), dev->inst_stats[i]);
+        
+        if (i < NUM_INSTS - 1)
+        {
+            printf(", ");
+        }
+        else
+        {
+            printf("\n");
+        }
+    }
+
+    printf("}\n");
+}
 
 
 static void *ilp_thread_proc(void *arg)
